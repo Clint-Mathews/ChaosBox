@@ -50,4 +50,4 @@ Go Servcie
    v
 Postgres
 
-#### Current Status: Detailed Phase 1
+#### Current Status: Boiler plate for server added

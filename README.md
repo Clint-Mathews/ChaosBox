@@ -2,7 +2,11 @@
 
 A local Kubernetes playground for simulating production conditions: resource limits, traffic spikes, network latency, regional delays, and service failures.
 
-We will get a Go service up and see how to improve it as we go.
+ChaosBox is an iterative lab for exploring how a deliberately simple system can evolve toward serving increasingly large workloads. The long-term question is: can this system evolve toward serving a billion users?
+
+The goal is not to simulate a billion concurrent users from one local cluster. The goal is to model production-shaped traffic and failure conditions, identify the next measurable constraint, implement a strategy to address it, and test the result.
+
+The project will progress in phases. It starts with a Go service and PostgreSQL, then introduces different technologies and architectural patterns only when a specific scaling, reliability, data, networking, or operational problem makes them relevant. Each phase should document the problem, the evidence, the chosen tradeoff, and what changed after the solution was implemented.
 
 ## Phases 
 

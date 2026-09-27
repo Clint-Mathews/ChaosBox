@@ -1,0 +1,19 @@
+meta {
+  name: 3. Filter Products By Prefix
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/products
+  body: none
+  auth: none
+}
+
+params:query {
+  name_prefix: Wire
+}
+
+assert {
+  res.status: eq 200
+}

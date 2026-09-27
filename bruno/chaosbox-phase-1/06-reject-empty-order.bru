@@ -1,0 +1,26 @@
+meta {
+  name: 6. Reject Empty Order
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/orders
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "items": []
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.error: eq "an order must contain at least one item"
+}

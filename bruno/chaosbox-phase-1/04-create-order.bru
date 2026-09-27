@@ -1,0 +1,35 @@
+meta {
+  name: 4. Create Multi-Product Order
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/orders
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "items": [
+      {
+        "product_id": 1,
+        "quantity": 1
+      },
+      {
+        "product_id": 2,
+        "quantity": 2
+      }
+    ]
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.headers["content-type"]: contains "application/json"
+}

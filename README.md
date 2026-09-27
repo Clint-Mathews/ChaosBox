@@ -50,4 +50,4 @@ Go Servcie
    v
 Postgres
 
-#### Current Status: Boiler plate for server added
+#### Current Status: Phase 1 store API and PostgreSQL integration added

@@ -44,15 +44,13 @@ GET  /orders
 - Docker
 - Seed scripts
 
-#### Initial Architecture
+#### Current Architecture
 
-Client
-   |
-   v
-Go Service
-   |
-   v
-PostgreSQL
+![ChaosBox Phase 1 architecture](assets/architecture/chaosbox-phase1.svg)
+
+The load generator runs outside Minikube and reaches the store through `kubectl port-forward`. Inside the `chaosbox` namespace, a ClusterIP Service routes requests to one constrained Go API replica, which uses PostgreSQL through its own stable Service. PostgreSQL data survives pod replacement through a `1Gi` persistent volume claim.
+
+[Open the editable Excalidraw source](assets/architecture/chaosbox-phase1.excalidraw)
 
 #### Current Status: Phase 1 Testing In Progress
 

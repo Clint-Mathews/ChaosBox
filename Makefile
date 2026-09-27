@@ -2,7 +2,7 @@ APP_DIR := apps/store
 COMPOSE := docker compose -f $(APP_DIR)/compose.yaml
 GO := go -C $(APP_DIR)
 
-.PHONY: help dev run db-up db-down db-status db-logs db-shell fmt test test-race vet check smoke
+.PHONY: help dev run db-up db-down db-status db-logs db-shell fmt test test-race test-e2e vet check smoke
 
 help:
 	@printf '%s\n' \
@@ -16,8 +16,9 @@ help:
 		'make fmt         Format all Go packages' \
 		'make test        Run all Go tests' \
 		'make test-race   Run all Go tests with the race detector' \
+		'make test-e2e    Run the Testcontainers end-to-end flow' \
 		'make vet         Run go vet' \
-		'make check       Run tests, race tests, and vet' \
+		'make check       Run unit, race, E2E, and vet checks' \
 		'make smoke       Check health and products on a running server'
 
 dev: db-up
@@ -50,10 +51,13 @@ test:
 test-race:
 	$(GO) test -race ./...
 
+test-e2e:
+	$(GO) test -tags=integration ./e2e -v -count=1
+
 vet:
 	$(GO) vet ./...
 
-check: test test-race vet
+check: test test-race test-e2e vet
 
 smoke:
 	curl --fail --silent --show-error http://localhost:8080/health

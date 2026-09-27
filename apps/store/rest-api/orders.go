@@ -38,7 +38,7 @@ func (h handler) createOrder(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, database.ErrProductNotFound):
 			writeError(w, http.StatusBadRequest, "one or more products do not exist")
 		case errors.Is(err, database.ErrDuplicateProduct):
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusBadRequest, database.ErrDuplicateProduct.Error())
 		default:
 			log.Printf("create order: %v", err)
 			writeError(w, http.StatusInternalServerError, "failed to create order")

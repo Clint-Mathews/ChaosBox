@@ -1,0 +1,8 @@
+.git
+.gitignore
+Dockerfile
+compose.yaml
+docs/
+e2e/
+**/*_test.go
+coverage.out

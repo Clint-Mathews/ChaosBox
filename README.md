@@ -57,9 +57,10 @@ PostgreSQL
 - Five products are seeded repeatably without duplicating data on server restart.
 - Orders support multiple products and are created transactionally.
 - Docker Compose runs PostgreSQL with persistent storage.
+- A multi-stage, non-root container image packages the Go store service.
 - Unit, race, and Testcontainers end-to-end tests are available through the root Makefile.
 - Bruno contains the complete local Phase 1 API flow.
-- GitHub Actions runs formatting, tests, vetting, and PostgreSQL end-to-end checks.
+- GitHub Actions runs formatting, tests, vetting, PostgreSQL end-to-end checks, and a container build.
 
 #### Testing
 

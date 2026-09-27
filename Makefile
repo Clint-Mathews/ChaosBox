@@ -1,14 +1,19 @@
 APP_DIR := apps/store
 COMPOSE := docker compose -f $(APP_DIR)/compose.yaml
 GO := go -C $(APP_DIR)
+PYTHON ?= python3
 STORE_IMAGE ?= chaosbox-store:local
 MINIKUBE_PROFILE ?= chaosbox
 KUBE_CONTEXT ?= $(MINIKUBE_PROFILE)
 KUBE_NAMESPACE ?= chaosbox
 MINIKUBE_DIR := deploy/minikube
 MINIKUBE_IMAGE ?= ghcr.io/clint-mathews/chaosbox-store:latest
+LOAD_BASE_URL ?= http://localhost:8081
+LOAD_USERS ?= 100
+LOAD_RAMP_SECONDS ?= 100
+LOAD_HOLD_SECONDS ?= 60
 
-.PHONY: help dev run image-build db-up db-down db-status db-logs db-shell minikube-start minikube-build minikube-deploy minikube-status minikube-url minikube-logs minikube-clean minikube-stop fmt test test-race test-e2e vet check smoke
+.PHONY: help dev run image-build db-up db-down db-status db-logs db-shell minikube-start minikube-build minikube-deploy minikube-status minikube-url minikube-forward minikube-logs minikube-clean minikube-stop load-smoke load-test load-results fmt test test-race test-e2e vet check smoke
 
 help:
 	@printf '%s\n' \
@@ -25,9 +30,13 @@ help:
 		'make minikube-deploy Deploy PostgreSQL and the store' \
 		'make minikube-status Show Minikube workloads and storage' \
 		'make minikube-url    Print the store URL' \
+		'make minikube-forward Forward the store to localhost:8081' \
 		'make minikube-logs   Follow store logs' \
 		'make minikube-clean  Delete ChaosBox workloads and data' \
 		'make minikube-stop   Stop the Minikube cluster' \
+		'make load-smoke      Run one external Python user journey' \
+		'make load-test       Ramp the external Python load to 100 users' \
+		'make load-results    Print the load-test artifact location' \
 		'make fmt         Format all Go packages' \
 		'make test        Run all Go tests' \
 		'make test-race   Run all Go tests with the race detector' \
@@ -78,6 +87,9 @@ minikube-status:
 minikube-url:
 	minikube service store --profile $(MINIKUBE_PROFILE) --namespace $(KUBE_NAMESPACE) --url
 
+minikube-forward:
+	kubectl --context $(KUBE_CONTEXT) --namespace $(KUBE_NAMESPACE) port-forward service/store 8081:8080
+
 minikube-logs:
 	kubectl --context $(KUBE_CONTEXT) --namespace $(KUBE_NAMESPACE) logs deployment/store --follow
 
@@ -86,6 +98,15 @@ minikube-clean:
 
 minikube-stop:
 	minikube stop --profile $(MINIKUBE_PROFILE)
+
+load-smoke:
+	$(PYTHON) tests/load/phase1.py --profile smoke --base-url $(LOAD_BASE_URL)
+
+load-test:
+	$(PYTHON) tests/load/phase1.py --profile load --base-url $(LOAD_BASE_URL) --users $(LOAD_USERS) --ramp-seconds $(LOAD_RAMP_SECONDS) --hold-seconds $(LOAD_HOLD_SECONDS)
+
+load-results:
+	@printf 'Load-test artifacts: %s/artifacts/load-tests\n' "$(CURDIR)"
 
 fmt:
 	$(GO) fmt ./...

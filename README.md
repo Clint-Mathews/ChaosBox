@@ -58,6 +58,7 @@ PostgreSQL
 - Orders support multiple products and are created transactionally.
 - Docker Compose runs PostgreSQL with persistent storage.
 - A multi-stage, non-root container image packages the Go store service.
+- Minikube manifests deploy the GitHub-published store image and persistent PostgreSQL.
 - Unit, race, and Testcontainers end-to-end tests are available through the root Makefile.
 - Bruno contains the complete local Phase 1 API flow.
 - GitHub Actions runs formatting, tests, vetting, PostgreSQL end-to-end checks, and a container build.
@@ -76,3 +77,14 @@ GET /products -> wait 200 ms -> POST /orders -> wait 200 ms -> GET /orders
 ```
 
 The load test must verify that each created `order_number` appears in the global orders response, at least 99% of checks pass, the HTTP failure rate remains below 1%, and the store pod has no unexpected restarts or OOM kills.
+
+#### Minikube Resource Limits
+
+| Service | CPU Request | CPU Limit | Memory Request | Memory Limit | Persistent Storage |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Store | `10m` | `100m` | `16Mi` | `32Mi` | None |
+| PostgreSQL | `25m` | `200m` | `64Mi` | `128Mi` | `1Gi` (`ReadWriteOnce`) |
+
+These intentionally low Phase 1 limits establish the first failure baseline.
+When load testing causes CPU throttling, OOM kills, or unacceptable latency,
+increase one resource at a time and compare the results.

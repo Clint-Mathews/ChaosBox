@@ -1,0 +1,199 @@
+package restapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/Clint-Mathews/chaosbox/apps/store/database"
+)
+
+func TestRequestID(t *testing.T) {
+	tests := []struct {
+		name     string
+		incoming string
+		preserve bool
+	}{
+		{name: "generated"},
+		{name: "valid", incoming: "load-test_123.example", preserve: true},
+		{name: "spaces rejected", incoming: "unsafe request id"},
+		{name: "non-ASCII rejected", incoming: "requ\xc3\xaate"},
+		{name: "too long rejected", incoming: strings.Repeat("a", 129)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var contextID string
+			store := fakeStore{listProducts: func(ctx context.Context, _ string) ([]database.Product, error) {
+				contextID = RequestIDFromContext(ctx)
+				return nil, nil
+			}}
+			request := httptest.NewRequest(http.MethodGet, "/products", nil)
+			if test.incoming != "" {
+				request.Header.Set(requestIDHeader, test.incoming)
+			}
+			recorder := httptest.NewRecorder()
+
+			NewHandler(store).ServeHTTP(recorder, request)
+
+			responseID := recorder.Header().Get(requestIDHeader)
+			if !validRequestID(responseID) {
+				t.Fatalf("expected a valid response request ID, got %q", responseID)
+			}
+			if test.preserve && responseID != test.incoming {
+				t.Fatalf("expected request ID %q, got %q", test.incoming, responseID)
+			}
+			if !test.preserve && test.incoming != "" && responseID == test.incoming {
+				t.Fatalf("expected unsafe request ID %q to be replaced", test.incoming)
+			}
+			if contextID != responseID {
+				t.Fatalf("expected store context request ID %q, got %q", responseID, contextID)
+			}
+		})
+	}
+}
+
+func TestRequestCompletionLog(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("created"))
+	})
+	mux := http.NewServeMux()
+	mux.Handle("POST /orders", handler)
+	request := httptest.NewRequest(http.MethodPost, "/orders", nil)
+	request.Header.Set(requestIDHeader, "request-123")
+	recorder := httptest.NewRecorder()
+
+	requestLogging(logger, mux).ServeHTTP(recorder, request)
+
+	entry := decodeLogEntry(t, output.String())
+	assertLogValue(t, entry, "msg", "request completed")
+	assertLogValue(t, entry, "request_id", "request-123")
+	assertLogValue(t, entry, "method", http.MethodPost)
+	assertLogValue(t, entry, "route", "/orders")
+	assertLogValue(t, entry, "status", float64(http.StatusCreated))
+	assertLogValue(t, entry, "response_bytes", float64(len("created")))
+	if _, ok := entry["duration_ms"].(float64); !ok {
+		t.Fatalf("expected numeric duration_ms, got %#v", entry["duration_ms"])
+	}
+}
+
+func TestRequestCompletionLogCapturesImplicitOK(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+	request := httptest.NewRequest(http.MethodGet, "/implicit", nil)
+	recorder := httptest.NewRecorder()
+
+	requestLogging(logger, handler).ServeHTTP(recorder, request)
+
+	entry := decodeLogEntry(t, output.String())
+	assertLogValue(t, entry, "status", float64(http.StatusOK))
+	assertLogValue(t, entry, "response_bytes", float64(len("ok")))
+}
+
+func TestInternalErrorLogUsesRequestID(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	store := fakeStore{listProducts: func(context.Context, string) ([]database.Product, error) {
+		return nil, errors.New("database unavailable")
+	}}
+	request := httptest.NewRequest(http.MethodGet, "/products", nil)
+	request.Header.Set(requestIDHeader, "request-456")
+	recorder := httptest.NewRecorder()
+
+	NewHandler(store, logger).ServeHTTP(recorder, request)
+
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected internal error and completion logs, got %d: %s", len(lines), output.String())
+	}
+	for _, line := range lines {
+		entry := decodeLogEntry(t, line)
+		assertLogValue(t, entry, "request_id", "request-456")
+	}
+}
+
+func TestUnmatchedRouteLogIsStable(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		target string
+		status int
+	}{
+		{name: "not found", method: http.MethodGet, target: "/orders/ORD-123?token=secret", status: http.StatusNotFound},
+		{name: "method not allowed", method: http.MethodPatch, target: "/orders", status: http.StatusMethodNotAllowed},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&output, nil))
+			request := httptest.NewRequest(test.method, test.target, nil)
+			recorder := httptest.NewRecorder()
+
+			NewHandler(fakeStore{}, logger).ServeHTTP(recorder, request)
+
+			entry := decodeLogEntry(t, output.String())
+			assertLogValue(t, entry, "route", "unmatched")
+			assertLogValue(t, entry, "status", float64(test.status))
+		})
+	}
+}
+
+func TestHealthCompletionLogLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		level     slog.Level
+		wantEntry bool
+	}{
+		{name: "suppressed at info", level: slog.LevelInfo},
+		{name: "included at debug", level: slog.LevelDebug, wantEntry: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: test.level}))
+			request := httptest.NewRequest(http.MethodGet, "/health", nil)
+			recorder := httptest.NewRecorder()
+
+			NewHandler(nil, logger).ServeHTTP(recorder, request)
+
+			if got := output.Len() > 0; got != test.wantEntry {
+				t.Fatalf("expected log entry=%t, got output %q", test.wantEntry, output.String())
+			}
+			if test.wantEntry {
+				entry := decodeLogEntry(t, output.String())
+				assertLogValue(t, entry, "level", "DEBUG")
+				assertLogValue(t, entry, "route", "/health")
+			}
+		})
+	}
+}
+
+func decodeLogEntry(t *testing.T, line string) map[string]any {
+	t.Helper()
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		t.Fatalf("decode log entry: %v: %s", err, line)
+	}
+	return entry
+}
+
+func assertLogValue(t *testing.T, entry map[string]any, key string, want any) {
+	t.Helper()
+	if got := entry[key]; got != want {
+		t.Fatalf("expected %s %#v, got %#v", key, want, got)
+	}
+}

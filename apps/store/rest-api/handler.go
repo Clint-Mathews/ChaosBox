@@ -2,6 +2,8 @@ package restapi
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/Clint-Mathews/chaosbox/apps/store/database"
@@ -17,7 +19,11 @@ type handler struct {
 	store Store
 }
 
-func NewHandler(store Store) http.Handler {
+func NewHandler(store Store, loggers ...*slog.Logger) http.Handler {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
 	handler := handler{store: store}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
@@ -25,5 +31,5 @@ func NewHandler(store Store) http.Handler {
 	mux.HandleFunc("POST /orders", handler.createOrder)
 	mux.HandleFunc("GET /orders", handler.listOrders)
 
-	return mux
+	return requestLogging(logger, mux)
 }

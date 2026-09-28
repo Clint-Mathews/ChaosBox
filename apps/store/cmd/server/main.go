@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Clint-Mathews/chaosbox/apps/store/database"
@@ -13,12 +14,18 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
+	logger := newLogger()
+	if err := run(logger); err != nil {
+		logger.Error("server stopped", "error", err)
+		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(loggers ...*slog.Logger) error {
+	logger := newLogger()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		databaseURL = "postgres://chaosbox:chaosbox@localhost:5432/chaosbox?sslmode=disable"
@@ -43,10 +50,10 @@ func run() error {
 	}
 
 	address := ":" + port
-	log.Printf("server listening on %s", address)
+	logger.Info("server listening", "address", address)
 	server := http.Server{
 		Addr:              address,
-		Handler:           restapi.NewHandler(db),
+		Handler:           restapi.NewHandler(db, logger),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	if err := server.ListenAndServe(); err != nil {
@@ -54,4 +61,12 @@ func run() error {
 	}
 
 	return nil
+}
+
+func newLogger() *slog.Logger {
+	level := new(slog.LevelVar)
+	if err := level.UnmarshalText([]byte(strings.ToLower(os.Getenv("LOG_LEVEL")))); err != nil {
+		level.Set(slog.LevelInfo)
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 }

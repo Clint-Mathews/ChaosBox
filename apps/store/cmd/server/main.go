@@ -11,6 +11,8 @@ import (
 
 	"github.com/Clint-Mathews/chaosbox/apps/store/database"
 	restapi "github.com/Clint-Mathews/chaosbox/apps/store/rest-api"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
 func main() {
@@ -51,9 +53,15 @@ func run(loggers ...*slog.Logger) error {
 
 	address := ":" + port
 	logger.Info("server listening", "address", address)
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		database.NewPoolCollector(db),
+	)
 	server := http.Server{
 		Addr:              address,
-		Handler:           restapi.NewHandler(db, logger),
+		Handler:           restapi.NewInstrumentedHandler(db, logger, registry),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	if err := server.ListenAndServe(); err != nil {

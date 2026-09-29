@@ -41,9 +41,15 @@ func (w *responseRecorder) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
-func requestLogging(logger *slog.Logger, next http.Handler) http.Handler {
+func requestLogging(logger *slog.Logger, next http.Handler, metricSets ...*httpMetrics) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
+		var metrics *httpMetrics
+		if len(metricSets) > 0 {
+			metrics = metricSets[0]
+			metrics.inFlight.Inc()
+			defer metrics.inFlight.Dec()
+		}
 		requestID := r.Header.Get(requestIDHeader)
 		if !validRequestID(requestID) {
 			requestID = newRequestID()
@@ -64,6 +70,9 @@ func requestLogging(logger *slog.Logger, next http.Handler) http.Handler {
 		level := slog.LevelInfo
 		if route == "/health" || route == "/metrics" {
 			level = slog.LevelDebug
+		}
+		if metrics != nil {
+			metrics.observe(r.Method, route, recorder.status, time.Since(started))
 		}
 		requestLogger.Log(r.Context(), level, "request completed",
 			"method", r.Method,

@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: chaosbox
+
+resources:
+  - store-servicemonitor.yaml
+
+configMapGenerator:
+  - name: store-grafana-dashboard
+    files:
+      - store-dashboard.json
+      - load-test-dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

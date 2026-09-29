@@ -7,6 +7,7 @@ import signal
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -29,6 +30,7 @@ class RequestMetric:
     status: int
     duration_ms: float
     passed: bool
+    request_id: str
 
 
 class Results:
@@ -47,7 +49,8 @@ class Results:
             if self.verbose or not metric.passed:
                 print(
                     f"[user {user_id:03d}] {method} {path} -> "
-                    f"{metric.status or 'ERROR'} ({metric.duration_ms:.1f} ms)",
+                    f"{metric.status or 'ERROR'} ({metric.duration_ms:.1f} ms) "
+                    f"request_id={metric.request_id}",
                     flush=True,
                 )
 
@@ -77,6 +80,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--think-seconds", type=non_negative_float, default=0.2)
     parser.add_argument("--timeout-seconds", type=positive_float, default=5.0)
     parser.add_argument("--output-dir", default="artifacts/load-tests")
+    parser.add_argument("--grafana-url", default="http://localhost:3000")
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 
@@ -114,7 +118,10 @@ def request_json(
     payload: Optional[dict[str, Any]] = None,
 ) -> tuple[int, Any]:
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    headers = {"Content-Type": "application/json"} if payload is not None else {}
+    request_id = uuid.uuid4().hex
+    headers = {"X-Request-ID": request_id}
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
     request = Request(f"{base_url}{path}", data=data, headers=headers, method=method)
     started = time.perf_counter()
     status = 0
@@ -124,9 +131,11 @@ def request_json(
         with urlopen(request, timeout=timeout) as response:
             status = response.status
             body = response.read()
+            request_id = response.headers.get("X-Request-ID", request_id)
     except HTTPError as error:
         status = error.code
         body = error.read()
+        request_id = error.headers.get("X-Request-ID", request_id)
     except (URLError, TimeoutError, OSError) as error:
         if results.verbose:
             print(f"[user {user_id:03d}] request error: {error}", file=sys.stderr, flush=True)
@@ -134,7 +143,13 @@ def request_json(
     duration_ms = (time.perf_counter() - started) * 1000
     passed = status == expected_status
     results.record_request(
-        RequestMetric(operation=operation, status=status, duration_ms=duration_ms, passed=passed),
+        RequestMetric(
+            operation=operation,
+            status=status,
+            duration_ms=duration_ms,
+            passed=passed,
+            request_id=request_id,
+        ),
         user_id,
         method,
         path,
@@ -268,6 +283,10 @@ def build_summary(results: Results, args: argparse.Namespace, elapsed_seconds: f
     check_rate = results.checks_passed / results.checks_total if results.checks_total else 0.0
     failure_rate = requests_failed / requests_total if requests_total else 1.0
     journey_rate = results.journeys_passed / results.journeys_total if results.journeys_total else 0.0
+    status_counts: dict[str, int] = {}
+    for metric in results.requests:
+        status = str(metric.status) if metric.status else "transport_error"
+        status_counts[status] = status_counts.get(status, 0) + 1
 
     operations = {}
     latency_thresholds_passed = True
@@ -300,6 +319,10 @@ def build_summary(results: Results, args: argparse.Namespace, elapsed_seconds: f
             "total": requests_total,
             "failed": requests_failed,
             "failure_rate": round(failure_rate, 4),
+            "status_counts": status_counts,
+            "representative_failures": [
+                asdict(metric) for metric in results.requests if not metric.passed
+            ][:20],
         },
         "checks": {
             "total": results.checks_total,
@@ -318,7 +341,7 @@ def build_summary(results: Results, args: argparse.Namespace, elapsed_seconds: f
     }
 
 
-def print_summary(summary: dict[str, Any], output_path: Path) -> None:
+def print_summary(summary: dict[str, Any], output_path: Path, dashboard_url: str) -> None:
     print("\nPhase 1 load-test summary")
     print(f"Profile: {summary['profile']}")
     print(f"Users: {summary['users']}")
@@ -343,6 +366,7 @@ def print_summary(summary: dict[str, Any], output_path: Path) -> None:
         )
     print(f"Result: {'PASS' if summary['passed'] else 'FAIL'}")
     print(f"Summary: {output_path}")
+    print(f"Grafana: {dashboard_url}")
 
 
 def main() -> int:
@@ -363,6 +387,7 @@ def main() -> int:
     users = 1 if args.profile == "smoke" else args.users
     run_once = args.profile == "smoke"
     started = time.monotonic()
+    started_at_ms = int(time.time() * 1000)
     deadline = started + (0 if run_once else args.ramp_seconds + args.hold_seconds)
 
     print(
@@ -395,13 +420,19 @@ def main() -> int:
             future.result()
 
     elapsed_seconds = time.monotonic() - started
+    finished_at_ms = int(time.time() * 1000)
     summary = build_summary(results, args, elapsed_seconds)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-{args.profile}"
     output_dir = Path(args.output_dir) / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "summary.json"
+    dashboard_url = (
+        f"{args.grafana_url.rstrip('/')}/d/chaosbox-load-test/chaosbox-load-test"
+        f"?from={started_at_ms - 5000}&to={finished_at_ms + 5000}"
+    )
+    summary["grafana_url"] = dashboard_url
     output_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-    print_summary(summary, output_path)
+    print_summary(summary, output_path, dashboard_url)
     return 0 if summary["passed"] else 1
 
 

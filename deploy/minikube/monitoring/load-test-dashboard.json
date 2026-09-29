@@ -1,0 +1,26 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {"type":"stat","title":"Store Available","id":1,"gridPos":{"h":4,"w":4,"x":0,"y":0},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"up{namespace=\"chaosbox\",service=\"store\"}","refId":"A"}],"fieldConfig":{"defaults":{"mappings":[{"type":"value","options":{"0":{"text":"DOWN","color":"red"},"1":{"text":"UP","color":"green"}}}]},"overrides":[]},"options":{"colorMode":"background","graphMode":"none","reduceOptions":{"calcs":["lastNotNull"],"values":false}}},
+    {"type":"stat","title":"Requests / Second","id":2,"gridPos":{"h":4,"w":5,"x":4,"y":0},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum(rate(store_http_requests_total{route!~\"/health|/metrics\"}[30s]))","refId":"A"}],"fieldConfig":{"defaults":{"unit":"reqps"},"overrides":[]},"options":{"reduceOptions":{"calcs":["mean"],"values":false}}},
+    {"type":"stat","title":"Error Percentage","id":3,"gridPos":{"h":4,"w":5,"x":9,"y":0},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"100 * sum(rate(store_http_requests_total{route!~\"/health|/metrics\",status=~\"4..|5..\"}[30s])) / clamp_min(sum(rate(store_http_requests_total{route!~\"/health|/metrics\"}[30s])), 0.001)","refId":"A"}],"fieldConfig":{"defaults":{"unit":"percent","thresholds":{"mode":"absolute","steps":[{"color":"green"},{"color":"yellow","value":1},{"color":"red","value":5}]}},"overrides":[]},"options":{"reduceOptions":{"calcs":["mean"],"values":false}}},
+    {"type":"stat","title":"p95 Latency","id":4,"gridPos":{"h":4,"w":5,"x":14,"y":0},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(store_http_request_duration_seconds_bucket{route!~\"/health|/metrics\"}[30s])))","refId":"A"}],"fieldConfig":{"defaults":{"unit":"s"},"overrides":[]},"options":{"reduceOptions":{"calcs":["mean"],"values":false}}},
+    {"type":"stat","title":"Peak In Flight","id":5,"gridPos":{"h":4,"w":5,"x":19,"y":0},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"max_over_time(store_http_requests_in_flight[$__range])","refId":"A"}],"options":{"reduceOptions":{"calcs":["max"],"values":false}}},
+    {"type":"timeseries","title":"Throughput by Route","id":6,"gridPos":{"h":8,"w":12,"x":0,"y":4},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (method, route) (rate(store_http_requests_total{route!~\"/health|/metrics\"}[30s]))","legendFormat":"{{method}} {{route}}","refId":"A"}],"fieldConfig":{"defaults":{"unit":"reqps"},"overrides":[]}},
+    {"type":"timeseries","title":"Latency Percentiles","id":7,"gridPos":{"h":8,"w":12,"x":12,"y":4},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"histogram_quantile(0.50, sum by (le) (rate(store_http_request_duration_seconds_bucket{route!~\"/health|/metrics\"}[30s])))","legendFormat":"p50","refId":"A"},{"expr":"histogram_quantile(0.95, sum by (le) (rate(store_http_request_duration_seconds_bucket{route!~\"/health|/metrics\"}[30s])))","legendFormat":"p95","refId":"B"},{"expr":"histogram_quantile(0.99, sum by (le) (rate(store_http_request_duration_seconds_bucket{route!~\"/health|/metrics\"}[30s])))","legendFormat":"p99","refId":"C"}],"fieldConfig":{"defaults":{"unit":"s"},"overrides":[]}},
+    {"type":"timeseries","title":"Store CPU and Memory","id":8,"gridPos":{"h":8,"w":12,"x":0,"y":12},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum(rate(container_cpu_usage_seconds_total{namespace=\"chaosbox\",pod=~\"store-.*\",container=\"store\"}[30s]))","legendFormat":"CPU cores","refId":"A"},{"expr":"sum(container_memory_working_set_bytes{namespace=\"chaosbox\",pod=~\"store-.*\",container=\"store\"})","legendFormat":"memory bytes","refId":"B"}],"fieldConfig":{"defaults":{},"overrides":[]}},
+    {"type":"timeseries","title":"Database Pool","id":9,"gridPos":{"h":8,"w":12,"x":12,"y":12},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"store_db_pool_acquired_connections","legendFormat":"acquired","refId":"A"},{"expr":"store_db_pool_idle_connections","legendFormat":"idle","refId":"B"},{"expr":"store_db_pool_max_connections","legendFormat":"max","refId":"C"}],"fieldConfig":{"defaults":{"unit":"short"},"overrides":[]}},
+    {"type":"logs","title":"Store Application Logs","id":10,"gridPos":{"h":12,"w":24,"x":0,"y":20},"datasource":{"type":"loki","uid":"loki"},"targets":[{"expr":"{namespace=\"chaosbox\",app=\"store\"} | json","refId":"A"}],"options":{"dedupStrategy":"none","enableLogDetails":true,"prettifyLogMessage":true,"showCommonLabels":false,"showLabels":false,"showTime":true,"sortOrder":"Descending","wrapLogMessage":true}}
+  ],
+  "refresh": "5s",
+  "schemaVersion": 41,
+  "tags": ["chaosbox", "load-test"],
+  "templating": {"list": []},
+  "time": {"from": "now-15m", "to": "now"},
+  "timezone": "browser",
+  "title": "ChaosBox Load Test",
+  "uid": "chaosbox-load-test",
+  "version": 1
+}

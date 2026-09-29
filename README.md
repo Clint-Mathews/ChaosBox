@@ -26,19 +26,19 @@ Minikube workflows additionally require `minikube` and `kubectl`:
 make minikube-start
 make minikube-build
 make minikube-deploy
-make minikube-forward
+make minikube-tunnel
 ```
 
-The forwarded API is available at `http://localhost:8081`. In another terminal, run `make load-smoke` or `make load-test`. Use `make minikube-clean` to remove workloads and data, and `make minikube-stop` to stop the cluster.
+Keep the tunnel running, then use `make minikube-url` to print the Nginx gateway URLs. Run `make load-smoke` or `make load-test` from another terminal. See the [Phase 1 details](PHASES.md#phase-1) for the architecture, observability baseline, and test requirements, or the [Minikube deployment guide](deploy/minikube/README.md) for operational commands.
 
 ## Current Architecture
 
-![ChaosBox Phase 1 architecture](assets/architecture/chaosbox-phase1.svg)
+![ChaosBox system overview](assets/architecture/chaosbox-overview.svg)
 
-The load generator runs outside Minikube and reaches the store through `kubectl port-forward`. Inside the `chaosbox` namespace, a ClusterIP Service routes requests to one constrained Go API replica, which uses PostgreSQL through its own stable Service. PostgreSQL data survives pod replacement through a `1Gi` persistent volume claim.
+The Phase 1 system uses one Nginx Ingress endpoint for the store and observability tools. See [Phase 1 architecture](PHASES.md#architecture) for the request, metrics, logging, and persistence paths.
 
 ## Current Status
 
-Phase 1 testing is in progress. The Go API, PostgreSQL migrations and seed data, container images, Minikube manifests, automated tests, load generator, Bruno flow, and CI pipeline are implemented.
+Phase 1 testing is in progress. The Go API, PostgreSQL migrations and seed data, structured request logging, Prometheus instrumentation, Grafana dashboards, Loki log collection, container images, Minikube manifests, automated tests, load generator, Bruno flow, and CI pipeline are implemented.
 
 See [Phase 1 details](PHASES.md#phase-1) for the full status and testing requirements.

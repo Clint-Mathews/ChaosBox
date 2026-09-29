@@ -23,6 +23,34 @@ make minikube-status
 make minikube-url
 ```
 
+`minikube-start` enables the Nginx Ingress addon. With Minikube's Docker driver
+on macOS, keep a tunnel running in a separate terminal so the ingress IP is
+reachable from the host:
+
+```bash
+make minikube-tunnel
+```
+
+This provides one gateway rather than one process per exposed Service. Print
+the current IP and paths with `make minikube-url`:
+
+```text
+http://127.0.0.1/api
+http://127.0.0.1/grafana/
+http://127.0.0.1/prometheus/
+```
+
+Nginx removes the `/api` prefix before forwarding store requests. Grafana and
+Prometheus are configured to serve from their prefixes. PostgreSQL and Loki
+remain cluster-internal. The existing port-forward targets remain available as
+diagnostic fallbacks, but they are not required for the normal workflow.
+
+Nginx is the HTTP gateway, not an additional application load balancer. It
+matches paths and sends requests to Kubernetes ClusterIP Services; those
+Services distribute requests among ready pods. A cloud `LoadBalancer` Service
+would only be needed to give the ingress controller an externally managed IP in
+a hosted environment. Locally, `minikube tunnel` provides host connectivity.
+
 ## Local Image
 
 Build the Dockerfile directly into Minikube before deploying:
@@ -104,17 +132,17 @@ The order matters: Helm installs the Prometheus Operator CRDs before the
 separate monitoring Kustomization creates the store `ServiceMonitor`.
 Application deployment does not depend on those CRDs.
 
-Open Grafana at `http://localhost:3000` using the `admin` user:
+Open Grafana through the gateway's `/grafana/` path using the `admin` user:
 
 ```bash
 make monitoring-grafana-password
-make monitoring-grafana-forward
+make minikube-url
 ```
 
-Open Prometheus at `http://localhost:9090`:
+Open Prometheus through the gateway's `/prometheus/` path:
 
 ```bash
-make monitoring-prometheus-forward
+make minikube-url
 ```
 
 The query `up{namespace="chaosbox",service="store"}` should return `1`. The
@@ -158,8 +186,8 @@ make monitoring-load-dashboard
 Each `make load-smoke` or `make load-test` run prints a Grafana URL scoped to
 the exact test time range. Every generated request carries an `X-Request-ID`,
 and failed request IDs are retained in `summary.json` for direct Loki searches.
-Keep both the store and Grafana port-forwards running while executing a load
-test.
+Keep `make minikube-tunnel` running while executing a load test. The store and
+Grafana use the same ingress endpoint, so separate port-forwards are unnecessary.
 
 The monitoring stack has explicit resource constraints, but its overhead can
 still affect small Minikube experiments. The store's `32Mi` memory limit is

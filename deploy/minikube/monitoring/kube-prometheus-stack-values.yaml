@@ -2,7 +2,15 @@ alertmanager:
   enabled: false
 
 prometheus:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    paths:
+      - /prometheus
+    pathType: Prefix
   prometheusSpec:
+    externalUrl: /prometheus
+    routePrefix: /prometheus
     retention: 24h
     scrapeInterval: 5s
     evaluationInterval: 5s
@@ -28,7 +36,15 @@ prometheusOperator:
 
 grafana:
   defaultDashboardsEnabled: false
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    path: /grafana
+    pathType: Prefix
   grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s/grafana/"
+      serve_from_sub_path: true
     dashboards:
       default_home_dashboard_path: /tmp/dashboards/store-dashboard.json
   resources:

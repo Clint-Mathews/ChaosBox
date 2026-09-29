@@ -23,12 +23,12 @@ ALLOY_CHART_VERSION ?= 1.13.0
 GRAFANA_LOCAL_PORT ?= 3000
 PROMETHEUS_LOCAL_PORT ?= 9090
 LOKI_LOCAL_PORT ?= 3100
-LOAD_BASE_URL ?= http://localhost:8081
+LOAD_BASE_URL ?= http://127.0.0.1/api
 LOAD_USERS ?= 100
 LOAD_RAMP_SECONDS ?= 100
 LOAD_HOLD_SECONDS ?= 60
 
-.PHONY: help dev run image-build db-up db-down db-status db-logs db-shell minikube-start minikube-build minikube-deploy minikube-status minikube-url minikube-forward minikube-logs minikube-db-logs minikube-db-shell minikube-db-clear minikube-previous-logs minikube-events minikube-top minikube-k9s minikube-clean minikube-stop monitoring-install monitoring-status monitoring-grafana-password monitoring-grafana-forward monitoring-prometheus-forward monitoring-loki-forward monitoring-load-dashboard monitoring-clean load-smoke load-test load-results fmt test test-race test-e2e vet check smoke
+.PHONY: help dev run image-build db-up db-down db-status db-logs db-shell minikube-start minikube-build minikube-deploy minikube-status minikube-url minikube-tunnel minikube-forward minikube-logs minikube-db-logs minikube-db-shell minikube-db-clear minikube-previous-logs minikube-events minikube-top minikube-k9s minikube-clean minikube-stop monitoring-install monitoring-status monitoring-grafana-password monitoring-grafana-forward monitoring-prometheus-forward monitoring-loki-forward monitoring-load-dashboard monitoring-clean load-smoke load-test load-results fmt test test-race test-e2e vet check smoke
 
 help:
 	@printf '%s\n' \
@@ -44,7 +44,8 @@ help:
 		'make minikube-build  Build the store image inside Minikube' \
 		'make minikube-deploy Deploy PostgreSQL and the store' \
 		'make minikube-status Show Minikube workloads and storage' \
-		'make minikube-url    Print the store URL' \
+		'make minikube-url    Print the Nginx gateway URLs' \
+		'make minikube-tunnel Make the ingress IP reachable from the host' \
 		'make minikube-forward Forward the store to localhost:8081' \
 		'make minikube-logs   Follow store logs' \
 		'make minikube-db-logs Follow PostgreSQL logs' \
@@ -102,6 +103,7 @@ db-shell:
 minikube-start:
 	minikube start --profile $(MINIKUBE_PROFILE) --driver=docker --alsologtostderr -v=1
 	minikube addons enable metrics-server --profile $(MINIKUBE_PROFILE)
+	minikube addons enable ingress --profile $(MINIKUBE_PROFILE)
 
 minikube-build:
 	minikube image build --profile $(MINIKUBE_PROFILE) --tag $(MINIKUBE_IMAGE) --file Dockerfile $(APP_DIR)
@@ -112,10 +114,16 @@ minikube-deploy:
 	kubectl --context $(KUBE_CONTEXT) --namespace $(KUBE_NAMESPACE) rollout status deployment/store --timeout=180s
 
 minikube-status:
-	kubectl --context $(KUBE_CONTEXT) --namespace $(KUBE_NAMESPACE) get pods,services,persistentvolumeclaims
+	kubectl --context $(KUBE_CONTEXT) --namespace $(KUBE_NAMESPACE) get pods,services,ingresses,persistentvolumeclaims
 
 minikube-url:
-	minikube service store --profile $(MINIKUBE_PROFILE) --namespace $(KUBE_NAMESPACE) --url
+	@printf '%s\n' \
+		'Store:      http://127.0.0.1/api' \
+		'Grafana:    http://127.0.0.1/grafana/' \
+		'Prometheus: http://127.0.0.1/prometheus/'
+
+minikube-tunnel:
+	minikube tunnel --profile $(MINIKUBE_PROFILE)
 
 minikube-forward:
 	kubectl --context $(KUBE_CONTEXT) --namespace $(KUBE_NAMESPACE) port-forward service/store 8081:8080
@@ -185,7 +193,7 @@ monitoring-loki-forward:
 	kubectl --context $(KUBE_CONTEXT) --namespace $(MONITORING_NAMESPACE) port-forward service/$(LOKI_RELEASE) $(LOKI_LOCAL_PORT):3100
 
 monitoring-load-dashboard:
-	@printf 'http://localhost:%s/d/chaosbox-load-test/chaosbox-load-test\n' "$(GRAFANA_LOCAL_PORT)"
+	@printf 'http://127.0.0.1/grafana/d/chaosbox-load-test/chaosbox-load-test\n'
 
 monitoring-clean:
 	@if kubectl --context $(KUBE_CONTEXT) get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then \

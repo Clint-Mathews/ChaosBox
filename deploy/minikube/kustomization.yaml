@@ -10,6 +10,7 @@ resources:
   - postgres-statefulset.yaml
   - store-service.yaml
   - store-deployment.yaml
+  - store-ingress.yaml
 
 labels:
   - pairs:

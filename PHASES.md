@@ -39,12 +39,34 @@ Build the simplest working application that ChaosBox can later use to simulate p
 - Orders support multiple products and are created transactionally.
 - Docker Compose runs PostgreSQL with persistent storage.
 - A multi-stage, non-root container image packages the Go store service.
-- Minikube manifests deploy the GitHub-published store image and persistent PostgreSQL.
+- Minikube manifests deploy the GitHub-published store image, Nginx Ingress routing, and persistent PostgreSQL.
+- Structured request logs and request IDs correlate load-test failures with Loki records.
+- Prometheus, Grafana, Loki, and Alloy provide a local metrics, dashboard, and logging baseline.
 - Unit, race, and Testcontainers end-to-end tests are available through the root Makefile.
 - Bruno contains the complete local Phase 1 API flow.
 - GitHub Actions runs formatting, tests, vetting, PostgreSQL end-to-end checks, and a container build.
 
-The [current architecture and diagram](README.md#current-architecture) remain in the main README.
+### Architecture
+
+![ChaosBox Phase 1 architecture](assets/architecture/chaosbox-phase1.svg)
+
+The load generator runs outside Minikube. `minikube tunnel` makes the cluster entry point reachable from the host, and Nginx Ingress routes one endpoint by path:
+
+- `/api` routes to the store ClusterIP Service.
+- `/grafana` routes to Grafana.
+- `/prometheus` routes to Prometheus.
+
+The store Service selects one deliberately constrained Go API pod. The API reaches PostgreSQL through a separate stable ClusterIP Service, and PostgreSQL stores its data in a `1Gi` persistent volume claim. PostgreSQL and Loki remain internal because the external workflow does not require direct access to either service.
+
+Nginx performs HTTP path routing; it is not an additional application load balancer. Kubernetes Services select ready pods and distribute traffic when replicas exist. A cloud load balancer would expose the ingress controller in a hosted environment, while `minikube tunnel` provides that connectivity locally.
+
+### Observability Baseline
+
+The store exposes HTTP, Go runtime, process, and PostgreSQL connection-pool metrics through `/metrics`. Prometheus discovers that endpoint through a `ServiceMonitor` and scrapes it every five seconds. Grafana includes store and load-test dashboards for throughput, errors, latency, resource use, restarts, pool activity, and correlated logs.
+
+The API writes structured JSON logs to standard output. Every response includes an `X-Request-ID`: a valid client-provided ID is preserved, otherwise the API generates one. Completion logs include the request ID, method, matched route, status, duration, and response size. Health and metrics requests use debug level to avoid routine probe noise.
+
+Grafana Alloy collects Kubernetes pod logs and sends them to Loki with 24-hour retention. Failed load-test request IDs and a Grafana URL scoped to each run are retained with the test artifacts, connecting client failures to metrics and server logs on the same timeline.
 
 ### Testing
 

@@ -19,55 +19,33 @@ var (
 )
 
 func (db *DB) CreateOrder(ctx context.Context, items []NewOrderItem) (Order, error) {
-	tx, err := db.pool.Begin(ctx)
-	if err != nil {
-		return Order{}, fmt.Errorf("begin order transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	orderNumber, err := newOrderNumber()
 	if err != nil {
 		return Order{}, err
 	}
 
-	var orderID int64
-	if err := tx.QueryRow(ctx,
-		`INSERT INTO orders (order_number) VALUES ($1) RETURNING id`,
-		orderNumber,
-	).Scan(&orderID); err != nil {
-		return Order{}, fmt.Errorf("insert order: %w", err)
+	productIDs := make([]int64, len(items))
+	quantities := make([]int64, len(items))
+	for index, item := range items {
+		productIDs[index] = item.ProductID
+		quantities[index] = int64(item.Quantity)
 	}
 
-	for _, item := range items {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO order_items (order_id, product_id, quantity)
-			 VALUES ($1, $2, $3)`,
-			orderID,
-			item.ProductID,
-			item.Quantity,
-		); err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) {
-				switch pgErr.Code {
-				case "23503": // foreign_key_violation
-					return Order{}, ErrProductNotFound
-				case "23505": // unique_violation
-					return Order{}, ErrDuplicateProduct
-				}
-			}
-			return Order{}, fmt.Errorf("insert order item: %w", err)
-		}
-	}
-
-	order, err := queryOrder(ctx, tx, orderID)
+	rows, err := db.pool.Query(ctx, createOrderQuery, orderNumber, productIDs, quantities)
 	if err != nil {
-		return Order{}, err
+		return Order{}, mapCreateOrderError(err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return Order{}, fmt.Errorf("commit order transaction: %w", err)
+	defer rows.Close()
+
+	orders, err := scanOrders(rows)
+	if err != nil {
+		return Order{}, mapCreateOrderError(err)
+	}
+	if len(orders) != 1 {
+		return Order{}, fmt.Errorf("create order: expected one order, got %d", len(orders))
 	}
 
-	return order, nil
+	return orders[0], nil
 }
 
 func (db *DB) GetOrder(ctx context.Context, orderID int64) (Order, error) {
@@ -98,22 +76,37 @@ const orderQuery = `
 	JOIN order_items oi ON oi.order_id = o.id
 	JOIN products p ON p.id = oi.product_id`
 
-func queryOrder(ctx context.Context, tx pgx.Tx, orderID int64) (Order, error) {
-	rows, err := tx.Query(ctx, orderQuery+` WHERE o.id = $1 ORDER BY oi.product_id`, orderID)
-	if err != nil {
-		return Order{}, fmt.Errorf("query created order: %w", err)
-	}
-	defer rows.Close()
+const createOrderQuery = `
+	WITH new_order AS (
+		INSERT INTO orders (order_number)
+		SELECT $1
+		WHERE cardinality($2::bigint[]) > 0
+		RETURNING id, order_number, created_at
+	), new_items AS (
+		INSERT INTO order_items (order_id, product_id, quantity)
+		SELECT new_order.id, input.product_id, input.quantity::integer
+		FROM new_order
+		CROSS JOIN unnest($2::bigint[], $3::bigint[]) AS input(product_id, quantity)
+		RETURNING order_id, product_id, quantity
+	)
+	SELECT new_order.id, new_order.order_number, new_order.created_at,
+	       new_items.product_id, products.name, new_items.quantity
+	FROM new_order
+	JOIN new_items ON new_items.order_id = new_order.id
+	JOIN products ON products.id = new_items.product_id
+	ORDER BY new_items.product_id`
 
-	orders, err := scanOrders(rows)
-	if err != nil {
-		return Order{}, err
+func mapCreateOrderError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch {
+		case pgErr.Code == "23503": // foreign_key_violation
+			return ErrProductNotFound
+		case pgErr.Code == "23505" && pgErr.ConstraintName == "order_items_pkey": // unique_violation
+			return ErrDuplicateProduct
+		}
 	}
-	if len(orders) != 1 {
-		return Order{}, fmt.Errorf("query created order: expected one order, got %d", len(orders))
-	}
-
-	return orders[0], nil
+	return fmt.Errorf("create order: %w", err)
 }
 
 func scanOrders(rows pgx.Rows) ([]Order, error) {

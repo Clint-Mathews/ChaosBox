@@ -137,6 +137,11 @@ func TestPhase1Flow(t *testing.T) {
 	}
 	assertRowCount(t, ctx, inspectionPool, "orders", 1)
 
+	if _, err := db.CreateOrder(ctx, nil); err == nil {
+		t.Fatal("expected an empty order to fail")
+	}
+	assertRowCount(t, ctx, inspectionPool, "orders", 1)
+
 	server.Close()
 	db.Close()
 

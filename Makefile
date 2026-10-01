@@ -27,8 +27,11 @@ LOAD_BASE_URL ?= http://127.0.0.1/api
 LOAD_USERS ?= 100
 LOAD_RAMP_SECONDS ?= 100
 LOAD_HOLD_SECONDS ?= 60
+PPROF_LOCAL_PORT ?= 6060
+PROFILE_SECONDS ?= 30
+PROFILE_DIR ?= artifacts/profiles
 
-.PHONY: help dev run image-build db-up db-down db-status db-logs db-shell minikube-start minikube-build minikube-deploy minikube-status minikube-url minikube-tunnel minikube-forward minikube-logs minikube-db-logs minikube-db-shell minikube-db-clear minikube-previous-logs minikube-events minikube-top minikube-k9s minikube-clean minikube-stop monitoring-install monitoring-status monitoring-grafana-password monitoring-grafana-forward monitoring-prometheus-forward monitoring-loki-forward monitoring-load-dashboard monitoring-clean load-smoke load-test load-results fmt test test-race test-e2e vet check smoke
+.PHONY: help dev run image-build db-up db-down db-status db-logs db-shell minikube-start minikube-build minikube-deploy minikube-status minikube-url minikube-tunnel minikube-forward minikube-logs minikube-db-logs minikube-db-shell minikube-db-clear minikube-previous-logs minikube-events minikube-top minikube-k9s minikube-clean minikube-stop monitoring-install monitoring-status monitoring-grafana-password monitoring-grafana-forward monitoring-prometheus-forward monitoring-loki-forward monitoring-load-dashboard monitoring-clean profile-forward profile-capture profile-cpu profile-heap profile-allocs profile-goroutine load-smoke load-test load-results fmt test test-race test-e2e vet check smoke
 
 help:
 	@printf '%s\n' \
@@ -65,6 +68,8 @@ help:
 		'make monitoring-loki-forward Forward Loki to localhost:3100' \
 		'make monitoring-load-dashboard Print the load-test dashboard URL' \
 		'make monitoring-clean Remove monitoring resources and Helm release' \
+		'make profile-forward Forward the private pprof listener to localhost:6060' \
+		'make profile-capture Capture CPU, heap, allocation, and goroutine profiles' \
 		'make load-smoke      Run one external Python user journey' \
 		'make load-test       Ramp the external Python load to 100 users' \
 		'make load-results    Print the load-test artifact location' \
@@ -205,6 +210,35 @@ monitoring-clean:
 		$(HELM) uninstall $(MONITORING_RELEASE) --namespace $(MONITORING_NAMESPACE) --ignore-not-found; \
 	fi
 	kubectl --context $(KUBE_CONTEXT) --namespace $(MONITORING_NAMESPACE) delete persistentvolumeclaims -l app.kubernetes.io/instance=$(LOKI_RELEASE) --ignore-not-found=true
+
+profile-forward:
+	kubectl --context $(KUBE_CONTEXT) --namespace $(KUBE_NAMESPACE) port-forward deployment/store $(PPROF_LOCAL_PORT):6060
+
+profile-capture: profile-cpu profile-heap profile-allocs profile-goroutine
+
+profile-cpu:
+	@mkdir -p $(PROFILE_DIR)
+	@timestamp="$$(date -u +%Y%m%dT%H%M%SZ)"; \
+	curl --fail --silent --show-error --output "$(PROFILE_DIR)/cpu-$$timestamp.pprof" "http://127.0.0.1:$(PPROF_LOCAL_PORT)/debug/pprof/profile?seconds=$(PROFILE_SECONDS)"; \
+	printf 'Captured %s\n' "$(PROFILE_DIR)/cpu-$$timestamp.pprof"
+
+profile-heap:
+	@mkdir -p $(PROFILE_DIR)
+	@timestamp="$$(date -u +%Y%m%dT%H%M%SZ)"; \
+	curl --fail --silent --show-error --output "$(PROFILE_DIR)/heap-$$timestamp.pprof" "http://127.0.0.1:$(PPROF_LOCAL_PORT)/debug/pprof/heap?gc=1"; \
+	printf 'Captured %s\n' "$(PROFILE_DIR)/heap-$$timestamp.pprof"
+
+profile-allocs:
+	@mkdir -p $(PROFILE_DIR)
+	@timestamp="$$(date -u +%Y%m%dT%H%M%SZ)"; \
+	curl --fail --silent --show-error --output "$(PROFILE_DIR)/allocs-$$timestamp.pprof" "http://127.0.0.1:$(PPROF_LOCAL_PORT)/debug/pprof/allocs"; \
+	printf 'Captured %s\n' "$(PROFILE_DIR)/allocs-$$timestamp.pprof"
+
+profile-goroutine:
+	@mkdir -p $(PROFILE_DIR)
+	@timestamp="$$(date -u +%Y%m%dT%H%M%SZ)"; \
+	curl --fail --silent --show-error --output "$(PROFILE_DIR)/goroutine-$$timestamp.pprof" "http://127.0.0.1:$(PPROF_LOCAL_PORT)/debug/pprof/goroutine"; \
+	printf 'Captured %s\n' "$(PROFILE_DIR)/goroutine-$$timestamp.pprof"
 
 load-smoke:
 	$(PYTHON) tests/load/phase1.py --profile smoke --base-url $(LOAD_BASE_URL)

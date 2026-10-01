@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -16,6 +18,20 @@ func TestRunRejectsInvalidDatabaseURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "create database pool") {
 		t.Fatalf("expected pool creation error, got %v", err)
+	}
+}
+
+func TestPprofHandler(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	response := httptest.NewRecorder()
+
+	newPprofHandler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected pprof index status 200, got %d", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), "Types of profiles available") {
+		t.Fatalf("expected pprof index, got %q", response.Body.String())
 	}
 }
 

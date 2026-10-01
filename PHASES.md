@@ -42,6 +42,7 @@ Build the simplest working application that ChaosBox can later use to simulate p
 - Minikube manifests deploy the GitHub-published store image, Nginx Ingress routing, and persistent PostgreSQL.
 - Structured request logs and request IDs correlate load-test failures with Loki records.
 - Prometheus, Grafana, Loki, and Alloy provide a local metrics, dashboard, and logging baseline.
+- A private, loopback-only `pprof` listener supports controlled CPU, heap, allocation, and goroutine captures during load tests.
 - Unit, race, and Testcontainers end-to-end tests are available through the root Makefile.
 - Bruno contains the complete local Phase 1 API flow.
 - GitHub Actions runs formatting, tests, vetting, PostgreSQL end-to-end checks, and a container build.

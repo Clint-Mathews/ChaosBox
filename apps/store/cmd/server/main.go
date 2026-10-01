@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"strings"
 	"time"
@@ -64,11 +66,39 @@ func run(loggers ...*slog.Logger) error {
 		Handler:           restapi.NewInstrumentedHandler(db, logger, registry),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	if pprofAddress := os.Getenv("PPROF_ADDRESS"); pprofAddress != "" {
+		listener, err := net.Listen("tcp", pprofAddress)
+		if err != nil {
+			return fmt.Errorf("listen for pprof: %w", err)
+		}
+		defer listener.Close()
+
+		logger.Info("pprof listening", "address", pprofAddress)
+		go func() {
+			profileServer := http.Server{
+				Handler:           newPprofHandler(),
+				ReadHeaderTimeout: 5 * time.Second,
+			}
+			if err := profileServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+				logger.Error("pprof server stopped", "error", err)
+			}
+		}()
+	}
 	if err := server.ListenAndServe(); err != nil {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
 
 	return nil
+}
+
+func newPprofHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	return mux
 }
 
 func newLogger() *slog.Logger {

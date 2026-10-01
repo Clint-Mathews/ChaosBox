@@ -193,6 +193,45 @@ The monitoring stack has explicit resource constraints, but its overhead can
 still affect small Minikube experiments. The store's `32Mi` memory limit is
 intentionally unchanged so OOM behavior remains visible.
 
+## Runtime Profiling
+
+Prometheus continuously exposes Go runtime signals such as goroutine count,
+heap usage, allocation totals, and garbage collection. Use `pprof` when those
+metrics identify a constrained window and code-level attribution is needed.
+
+The store runs `pprof` on `127.0.0.1:6060` inside its pod. It has no Kubernetes
+Service or Ingress route, so it is unavailable through the public gateway. Open
+a controlled local connection in a separate terminal:
+
+```bash
+make profile-forward
+```
+
+While the same load test is active, capture a 30-second CPU profile followed by
+heap, allocation, and goroutine snapshots:
+
+```bash
+make profile-capture
+```
+
+Override the CPU duration when necessary:
+
+```bash
+make profile-cpu PROFILE_SECONDS=60
+```
+
+Profiles are written beneath `artifacts/profiles` with UTC timestamps. Inspect
+one interactively or print its highest-cost functions with:
+
+```bash
+go tool pprof -http=:0 artifacts/profiles/cpu-TIMESTAMP.pprof
+go tool pprof -top artifacts/profiles/heap-TIMESTAMP.pprof
+```
+
+Capture profiles only during a defined workload window and compare them with
+the matching Grafana time range. CPU profiling adds measurement overhead; heap
+captures use `gc=1` and trigger garbage collection before taking the snapshot.
+
 Remove custom monitoring resources before uninstalling the chart:
 
 ```bash

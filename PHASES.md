@@ -14,15 +14,17 @@ Build the simplest working application that ChaosBox can later use to simulate p
 
 1. Products are seeded into the database.
 2. A user fetches the available products.
-3. The user buys one or more products.
-4. The user fetches the orders listing.
+3. The user buys one or more products and receives an `order_number`.
+4. The user fetches that order by its `order_number`.
+
+Fetching all orders would return a growing response as new orders are created, so the flow retrieves only the order just created.
 
 ### Endpoints
 
 - `GET /health`: check service health.
 - `GET /products`: fetch available products.
 - `POST /orders`: buy one or more products and create an order.
-- `GET /orders`: fetch orders.
+- `GET /orders/{order_number}`: fetch one order by its public order number.
 
 ### Stack
 
@@ -33,7 +35,7 @@ Build the simplest working application that ChaosBox can later use to simulate p
 
 ### Status: Testing In Progress
 
-- The Go REST API implements health, product listing, order creation, and order listing.
+- The Go REST API implements health, product listing, order creation, and single-order lookup.
 - PostgreSQL migrations create products, orders, and order items with constraints and indexes.
 - Five products are seeded repeatably without duplicating data on server restart.
 - Orders support multiple products and are created transactionally.
@@ -76,13 +78,15 @@ Testing has two layers:
 - Correctness testing through Go unit tests, race detection, Testcontainers end-to-end tests, Bruno, and GitHub Actions.
 - Load testing in Minikube with CPU and memory limits while traffic ramps from 0 to 100 concurrent users at one new user per second.
 
-Each virtual user repeatedly performs this flow:
+The load script in `tests/load/phase1.py` has each virtual user repeatedly perform this flow:
 
 ```text
-GET /products -> wait 200 ms -> POST /orders -> wait 200 ms -> GET /orders
+GET /products -> wait 200 ms -> POST /orders -> wait 200 ms -> GET /orders/{order_number}
 ```
 
-The load test must verify that each created `order_number` appears in the global orders response, at least 99% of checks pass, the HTTP failure rate remains below 1%, and the store pod has no unexpected restarts or OOM kills.
+The load test must fetch each created `order_number` directly and verify that the returned order matches it, at least 99% of checks pass, the HTTP failure rate remains below 1%, and the store pod has no unexpected restarts or OOM kills.
+
+With `make minikube-tunnel` running, use `make load-smoke` to run one journey or `make load-test` to ramp up virtual users. `make smoke` checks only health and products on a local server.
 
 ### Minikube Resource Limits
 

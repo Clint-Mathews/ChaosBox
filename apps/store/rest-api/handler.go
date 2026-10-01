@@ -15,7 +15,7 @@ import (
 type Store interface {
 	ListProducts(context.Context, string) ([]database.Product, error)
 	CreateOrder(context.Context, []database.NewOrderItem) (database.Order, error)
-	ListOrders(context.Context) ([]database.Order, error)
+	GetOrder(context.Context, string) (database.Order, error)
 }
 
 type handler struct {
@@ -42,7 +42,7 @@ func NewInstrumentedHandler(store Store, logger *slog.Logger, registry *promethe
 	mux.Handle("GET /metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 	mux.HandleFunc("GET /products", handler.listProducts)
 	mux.HandleFunc("POST /orders", handler.createOrder)
-	mux.HandleFunc("GET /orders", handler.listOrders)
+	mux.HandleFunc("GET /orders/{order_number}", handler.getOrder)
 
 	return requestLogging(logger, mux, newHTTPMetrics(registry))
 }

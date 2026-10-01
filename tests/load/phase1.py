@@ -20,7 +20,7 @@ from urllib.request import Request, urlopen
 THRESHOLDS_MS = {
     "list_products": 500,
     "create_order": 1000,
-    "list_orders": 1000,
+    "get_order": 1000,
 }
 
 
@@ -219,23 +219,23 @@ def run_journey(
     if stop_event.wait(think_seconds):
         return False
 
-    orders_status, orders = request_json(
+    fetched_status, fetched_order = request_json(
         results,
         user_id,
         base_url,
         "GET",
-        "/orders",
-        "list_orders",
+        f"/orders/{order_number}",
+        "get_order",
         200,
         timeout,
     )
-    orders_ok = results.check(orders_status == 200, user_id, "orders status is 200")
-    orders_ok = results.check(isinstance(orders, list), user_id, "orders response is an array") and orders_ok
-    order_found = isinstance(orders, list) and any(
-        item.get("order_number") == order_number for item in orders if isinstance(item, dict)
-    )
-    orders_ok = results.check(order_found, user_id, "created order appears in orders") and orders_ok
-    return orders_ok
+    fetched_ok = results.check(fetched_status == 200, user_id, "get order status is 200")
+    fetched_ok = results.check(
+        isinstance(fetched_order, dict) and fetched_order.get("order_number") == order_number,
+        user_id,
+        "fetched order matches the created order",
+    ) and fetched_ok
+    return fetched_ok
 
 
 def run_user(

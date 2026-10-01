@@ -1,0 +1,16 @@
+meta {
+  name: 5. Get Created Order
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/orders/{{orderNumber}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.order_number: eq {{orderNumber}}
+}

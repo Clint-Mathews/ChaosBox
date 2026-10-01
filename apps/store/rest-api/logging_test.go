@@ -124,15 +124,16 @@ func TestInternalErrorLogUsesRequestID(t *testing.T) {
 	}
 }
 
-func TestUnmatchedRouteLogIsStable(t *testing.T) {
+func TestErrorRouteLogIsStable(t *testing.T) {
 	tests := []struct {
 		name   string
 		method string
 		target string
 		status int
+		route  string
 	}{
-		{name: "not found", method: http.MethodGet, target: "/orders/ORD-123?token=secret", status: http.StatusNotFound},
-		{name: "method not allowed", method: http.MethodPatch, target: "/orders", status: http.StatusMethodNotAllowed},
+		{name: "order not found", method: http.MethodGet, target: "/orders/ORD-123?token=secret", status: http.StatusNotFound, route: "/orders/{order_number}"},
+		{name: "method not allowed", method: http.MethodPatch, target: "/orders", status: http.StatusMethodNotAllowed, route: "unmatched"},
 	}
 
 	for _, test := range tests {
@@ -145,7 +146,7 @@ func TestUnmatchedRouteLogIsStable(t *testing.T) {
 			NewHandler(fakeStore{}, logger).ServeHTTP(recorder, request)
 
 			entry := decodeLogEntry(t, output.String())
-			assertLogValue(t, entry, "route", "unmatched")
+			assertLogValue(t, entry, "route", test.route)
 			assertLogValue(t, entry, "status", float64(test.status))
 		})
 	}

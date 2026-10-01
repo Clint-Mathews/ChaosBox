@@ -24,6 +24,7 @@ GRAFANA_LOCAL_PORT ?= 3000
 PROMETHEUS_LOCAL_PORT ?= 9090
 LOKI_LOCAL_PORT ?= 3100
 LOAD_BASE_URL ?= http://127.0.0.1/api
+GRAFANA_URL ?= http://127.0.0.1/grafana
 LOAD_USERS ?= 100
 LOAD_RAMP_SECONDS ?= 100
 LOAD_HOLD_SECONDS ?= 60
@@ -241,10 +242,10 @@ profile-goroutine:
 	printf 'Captured %s\n' "$(PROFILE_DIR)/goroutine-$$timestamp.pprof"
 
 load-smoke:
-	$(PYTHON) tests/load/phase1.py --profile smoke --base-url $(LOAD_BASE_URL)
+	$(PYTHON) tests/load/phase1.py --profile smoke --base-url $(LOAD_BASE_URL) --grafana-url $(GRAFANA_URL)
 
 load-test:
-	$(PYTHON) tests/load/phase1.py --profile load --base-url $(LOAD_BASE_URL) --users $(LOAD_USERS) --ramp-seconds $(LOAD_RAMP_SECONDS) --hold-seconds $(LOAD_HOLD_SECONDS)
+	$(PYTHON) tests/load/phase1.py --profile load --base-url $(LOAD_BASE_URL) --grafana-url $(GRAFANA_URL) --users $(LOAD_USERS) --ramp-seconds $(LOAD_RAMP_SECONDS) --hold-seconds $(LOAD_HOLD_SECONDS)
 
 load-results:
 	@printf 'Load-test artifacts: %s/artifacts/load-tests\n' "$(CURDIR)"

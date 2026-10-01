@@ -48,15 +48,19 @@ func (h handler) createOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusCreated, order)
 }
 
-func (h handler) listOrders(w http.ResponseWriter, r *http.Request) {
-	orders, err := h.store.ListOrders(r.Context())
+func (h handler) getOrder(w http.ResponseWriter, r *http.Request) {
+	order, err := h.store.GetOrder(r.Context(), r.PathValue("order_number"))
 	if err != nil {
-		loggerFromContext(r.Context()).ErrorContext(r.Context(), "list orders failed", "error", err)
-		writeError(w, r, http.StatusInternalServerError, "failed to fetch orders")
+		if errors.Is(err, database.ErrOrderNotFound) {
+			writeError(w, r, http.StatusNotFound, database.ErrOrderNotFound.Error())
+			return
+		}
+		loggerFromContext(r.Context()).ErrorContext(r.Context(), "get order failed", "error", err)
+		writeError(w, r, http.StatusInternalServerError, "failed to fetch order")
 		return
 	}
 
-	writeJSON(w, r, http.StatusOK, orders)
+	writeJSON(w, r, http.StatusOK, order)
 }
 
 func validateOrderItems(items []database.NewOrderItem) string {

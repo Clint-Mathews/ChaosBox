@@ -102,12 +102,13 @@ func TestPhase1Flow(t *testing.T) {
 		t.Fatalf("unexpected created order: %+v", createdOrder)
 	}
 
-	ordersBody := request(t, client, http.MethodGet, server.URL+"/orders", nil, http.StatusOK)
-	var orders []database.Order
-	decodeJSON(t, ordersBody, &orders)
-	if len(orders) != 1 || orders[0].OrderNumber != createdOrder.OrderNumber {
-		t.Fatalf("unexpected orders: %+v", orders)
+	orderBody := request(t, client, http.MethodGet, server.URL+"/orders/"+createdOrder.OrderNumber, nil, http.StatusOK)
+	var order database.Order
+	decodeJSON(t, orderBody, &order)
+	if order.OrderNumber != createdOrder.OrderNumber {
+		t.Fatalf("unexpected order: %+v", order)
 	}
+	request(t, client, http.MethodGet, server.URL+"/orders/ORD-MISSING", nil, http.StatusNotFound)
 
 	invalidBody := []byte(`{"items":[{"product_id":999999,"quantity":1}]}`)
 	request(t, client, http.MethodPost, server.URL+"/orders", invalidBody, http.StatusBadRequest)
@@ -142,11 +143,11 @@ func TestPhase1Flow(t *testing.T) {
 	t.Cleanup(server.Close)
 	t.Cleanup(db.Close)
 
-	persistedBody := request(t, server.Client(), http.MethodGet, server.URL+"/orders", nil, http.StatusOK)
-	var persistedOrders []database.Order
-	decodeJSON(t, persistedBody, &persistedOrders)
-	if len(persistedOrders) != 1 || persistedOrders[0].OrderNumber != createdOrder.OrderNumber {
-		t.Fatalf("order did not persist across restart: %+v", persistedOrders)
+	persistedBody := request(t, server.Client(), http.MethodGet, server.URL+"/orders/"+createdOrder.OrderNumber, nil, http.StatusOK)
+	var persistedOrder database.Order
+	decodeJSON(t, persistedBody, &persistedOrder)
+	if persistedOrder.OrderNumber != createdOrder.OrderNumber {
+		t.Fatalf("order did not persist across restart: %+v", persistedOrder)
 	}
 	assertRowCount(t, ctx, inspectionPool, "products", 5)
 
@@ -186,12 +187,8 @@ func TestPhase1Flow(t *testing.T) {
 		t.Fatalf("expected cascade to delete order items, got %d", itemCount)
 	}
 
-	emptyOrders, err := db.ListOrders(ctx)
-	if err != nil {
-		t.Fatalf("list empty orders: %v", err)
-	}
-	if emptyOrders == nil || len(emptyOrders) != 0 {
-		t.Fatalf("expected non-nil empty order slice, got %+v", emptyOrders)
+	if _, err := db.GetOrder(ctx, createdOrder.OrderNumber); !errors.Is(err, database.ErrOrderNotFound) {
+		t.Fatalf("expected deleted order not to be found, got %v", err)
 	}
 }
 

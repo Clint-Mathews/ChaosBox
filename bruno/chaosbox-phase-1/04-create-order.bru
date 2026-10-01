@@ -33,3 +33,7 @@ assert {
   res.status: eq 201
   res.headers["content-type"]: contains "application/json"
 }
+
+script:post-response {
+  bru.setVar("orderNumber", res.body.order_number);
+}

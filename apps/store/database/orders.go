@@ -15,6 +15,7 @@ import (
 var (
 	ErrProductNotFound  = errors.New("product not found")
 	ErrDuplicateProduct = errors.New("an order cannot contain duplicate products")
+	ErrOrderNotFound    = errors.New("order not found")
 )
 
 func (db *DB) CreateOrder(ctx context.Context, items []NewOrderItem) (Order, error) {
@@ -69,14 +70,25 @@ func (db *DB) CreateOrder(ctx context.Context, items []NewOrderItem) (Order, err
 	return order, nil
 }
 
-func (db *DB) ListOrders(ctx context.Context) ([]Order, error) {
-	rows, err := db.pool.Query(ctx, orderQuery+` ORDER BY o.id, oi.product_id`)
+func (db *DB) GetOrder(ctx context.Context, orderNumber string) (Order, error) {
+	rows, err := db.pool.Query(ctx, orderQuery+` WHERE o.order_number = $1 ORDER BY oi.product_id`, orderNumber)
 	if err != nil {
-		return nil, fmt.Errorf("query orders: %w", err)
+		return Order{}, fmt.Errorf("query order: %w", err)
 	}
 	defer rows.Close()
 
-	return scanOrders(rows)
+	orders, err := scanOrders(rows)
+	if err != nil {
+		return Order{}, err
+	}
+	if len(orders) == 0 {
+		return Order{}, ErrOrderNotFound
+	}
+	if len(orders) != 1 {
+		return Order{}, fmt.Errorf("query order: expected one order, got %d", len(orders))
+	}
+
+	return orders[0], nil
 }
 
 const orderQuery = `

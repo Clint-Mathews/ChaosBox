@@ -19,7 +19,7 @@ import (
 type fakeStore struct {
 	listProducts func(context.Context, string) ([]database.Product, error)
 	createOrder  func(context.Context, []database.NewOrderItem) (database.Order, error)
-	listOrders   func(context.Context) ([]database.Order, error)
+	getOrder     func(context.Context, string) (database.Order, error)
 }
 
 func (store fakeStore) ListProducts(ctx context.Context, prefix string) ([]database.Product, error) {
@@ -36,11 +36,11 @@ func (store fakeStore) CreateOrder(ctx context.Context, items []database.NewOrde
 	return store.createOrder(ctx, items)
 }
 
-func (store fakeStore) ListOrders(ctx context.Context) ([]database.Order, error) {
-	if store.listOrders == nil {
-		return []database.Order{}, nil
+func (store fakeStore) GetOrder(ctx context.Context, orderNumber string) (database.Order, error) {
+	if store.getOrder == nil {
+		return database.Order{}, database.ErrOrderNotFound
 	}
-	return store.listOrders(ctx)
+	return store.getOrder(ctx, orderNumber)
 }
 
 func TestListProducts(t *testing.T) {
@@ -273,57 +273,58 @@ func TestCreateOrderMapsStoreErrors(t *testing.T) {
 	}
 }
 
-func TestListOrders(t *testing.T) {
-	want := []database.Order{{
+func TestGetOrder(t *testing.T) {
+	want := database.Order{
 		ID:          7,
 		OrderNumber: "ORD-123",
 		Items:       []database.OrderItem{{ProductID: 1, ProductName: "Mechanical Keyboard", Quantity: 2}},
-	}}
+	}
 	store := fakeStore{
-		listOrders: func(context.Context) ([]database.Order, error) {
+		getOrder: func(_ context.Context, orderNumber string) (database.Order, error) {
+			if orderNumber != want.OrderNumber {
+				t.Fatalf("expected order number %q, got %q", want.OrderNumber, orderNumber)
+			}
 			return want, nil
 		},
 	}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/orders", nil)
+	request := httptest.NewRequest(http.MethodGet, "/orders/ORD-123", nil)
 
 	NewHandler(store).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
 	}
-	var orders []database.Order
-	if err := json.NewDecoder(recorder.Body).Decode(&orders); err != nil {
+	var order database.Order
+	if err := json.NewDecoder(recorder.Body).Decode(&order); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !reflect.DeepEqual(orders, want) {
-		t.Fatalf("expected orders %+v, got %+v", want, orders)
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("expected order %+v, got %+v", want, order)
 	}
 }
 
-func TestListOrdersReturnsEmptyArray(t *testing.T) {
+func TestGetOrderReturnsNotFound(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/orders", nil)
+	request := httptest.NewRequest(http.MethodGet, "/orders/ORD-MISSING", nil)
 
 	NewHandler(fakeStore{}).ServeHTTP(recorder, request)
 
-	if got, want := recorder.Body.String(), "[]\n"; got != want {
-		t.Fatalf("expected body %q, got %q", want, got)
-	}
+	assertErrorResponse(t, recorder, http.StatusNotFound, database.ErrOrderNotFound.Error())
 }
 
-func TestListOrdersHandlesStoreError(t *testing.T) {
+func TestGetOrderHandlesStoreError(t *testing.T) {
 	store := fakeStore{
-		listOrders: func(context.Context) ([]database.Order, error) {
-			return nil, errors.New("database unavailable")
+		getOrder: func(context.Context, string) (database.Order, error) {
+			return database.Order{}, errors.New("database unavailable")
 		},
 	}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/orders", nil)
+	request := httptest.NewRequest(http.MethodGet, "/orders/ORD-123", nil)
 
 	NewHandler(store).ServeHTTP(recorder, request)
 
-	assertErrorResponse(t, recorder, http.StatusInternalServerError, "failed to fetch orders")
+	assertErrorResponse(t, recorder, http.StatusInternalServerError, "failed to fetch order")
 }
 
 func TestHandlerRouting(t *testing.T) {
@@ -336,6 +337,7 @@ func TestHandlerRouting(t *testing.T) {
 		{name: "unknown path", method: http.MethodGet, path: "/missing", status: http.StatusNotFound},
 		{name: "products wrong method", method: http.MethodPost, path: "/products", status: http.StatusMethodNotAllowed},
 		{name: "orders wrong method", method: http.MethodPut, path: "/orders", status: http.StatusMethodNotAllowed},
+		{name: "orders collection has no get", method: http.MethodGet, path: "/orders", status: http.StatusMethodNotAllowed},
 		{name: "products trailing slash", method: http.MethodGet, path: "/products/", status: http.StatusNotFound},
 	}
 

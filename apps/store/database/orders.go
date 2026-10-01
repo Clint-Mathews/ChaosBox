@@ -70,8 +70,8 @@ func (db *DB) CreateOrder(ctx context.Context, items []NewOrderItem) (Order, err
 	return order, nil
 }
 
-func (db *DB) GetOrder(ctx context.Context, orderNumber string) (Order, error) {
-	rows, err := db.pool.Query(ctx, orderQuery+` WHERE o.order_number = $1 ORDER BY oi.product_id`, orderNumber)
+func (db *DB) GetOrder(ctx context.Context, orderID int64) (Order, error) {
+	rows, err := db.pool.Query(ctx, orderQuery+` WHERE o.id = $1 ORDER BY oi.product_id`, orderID)
 	if err != nil {
 		return Order{}, fmt.Errorf("query order: %w", err)
 	}

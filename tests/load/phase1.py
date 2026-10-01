@@ -206,12 +206,13 @@ def run_journey(
         timeout,
         {"items": [{"product_id": product["id"], "quantity": 1}]},
     )
+    order_id = order.get("id") if isinstance(order, dict) else None
     order_number = order.get("order_number") if isinstance(order, dict) else None
     order_ok = results.check(order_status == 201, user_id, "create order status is 201")
     order_ok = results.check(
-        isinstance(order_number, str) and len(order_number) > 0,
+        isinstance(order_id, int) and order_id > 0,
         user_id,
-        "create order returns an order number",
+        "create order returns an order ID",
     ) and order_ok
     if not order_ok:
         return False
@@ -224,7 +225,7 @@ def run_journey(
         user_id,
         base_url,
         "GET",
-        f"/orders/{order_number}",
+        f"/orders/{order_id}",
         "get_order",
         200,
         timeout,

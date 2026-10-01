@@ -132,7 +132,7 @@ func TestErrorRouteLogIsStable(t *testing.T) {
 		status int
 		route  string
 	}{
-		{name: "order not found", method: http.MethodGet, target: "/orders/ORD-123?token=secret", status: http.StatusNotFound, route: "/orders/{order_number}"},
+		{name: "order not found", method: http.MethodGet, target: "/orders/123?token=secret", status: http.StatusNotFound, route: "/orders/{id}"},
 		{name: "method not allowed", method: http.MethodPatch, target: "/orders", status: http.StatusMethodNotAllowed, route: "unmatched"},
 	}
 

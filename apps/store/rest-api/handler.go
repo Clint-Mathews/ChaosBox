@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/Clint-Mathews/chaosbox/apps/store/database"
 	"github.com/prometheus/client_golang/prometheus"
@@ -15,11 +16,18 @@ import (
 type Store interface {
 	ListProducts(context.Context, string) ([]database.Product, error)
 	CreateOrder(context.Context, []database.NewOrderItem) (database.Order, error)
-	GetOrder(context.Context, string) (database.Order, error)
+	GetOrder(context.Context, int64) (database.Order, error)
 }
 
 type handler struct {
-	store Store
+	store        Store
+	productCache *productCache
+}
+
+type productCache struct {
+	mu       sync.RWMutex
+	loaded   bool
+	products []database.Product
 }
 
 func NewHandler(store Store, loggers ...*slog.Logger) http.Handler {
@@ -36,13 +44,13 @@ func NewHandler(store Store, loggers ...*slog.Logger) http.Handler {
 }
 
 func NewInstrumentedHandler(store Store, logger *slog.Logger, registry *prometheus.Registry) http.Handler {
-	handler := handler{store: store}
+	handler := handler{store: store, productCache: &productCache{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.Handle("GET /metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 	mux.HandleFunc("GET /products", handler.listProducts)
 	mux.HandleFunc("POST /orders", handler.createOrder)
-	mux.HandleFunc("GET /orders/{order_number}", handler.getOrder)
+	mux.HandleFunc("GET /orders/{id}", handler.getOrder)
 
 	return requestLogging(logger, mux, newHTTPMetrics(registry))
 }

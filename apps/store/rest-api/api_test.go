@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,7 +21,7 @@ import (
 type fakeStore struct {
 	listProducts func(context.Context, string) ([]database.Product, error)
 	createOrder  func(context.Context, []database.NewOrderItem) (database.Order, error)
-	getOrder     func(context.Context, string) (database.Order, error)
+	getOrder     func(context.Context, int64) (database.Order, error)
 }
 
 func (store fakeStore) ListProducts(ctx context.Context, prefix string) ([]database.Product, error) {
@@ -36,11 +38,11 @@ func (store fakeStore) CreateOrder(ctx context.Context, items []database.NewOrde
 	return store.createOrder(ctx, items)
 }
 
-func (store fakeStore) GetOrder(ctx context.Context, orderNumber string) (database.Order, error) {
+func (store fakeStore) GetOrder(ctx context.Context, orderID int64) (database.Order, error) {
 	if store.getOrder == nil {
 		return database.Order{}, database.ErrOrderNotFound
 	}
-	return store.getOrder(ctx, orderNumber)
+	return store.getOrder(ctx, orderID)
 }
 
 func TestListProducts(t *testing.T) {
@@ -89,6 +91,71 @@ func TestListProductsReturnsEmptyArray(t *testing.T) {
 
 	if got, want := recorder.Body.String(), "[]\n"; got != want {
 		t.Fatalf("expected body %q, got %q", want, got)
+	}
+}
+
+func TestListProductsCachesUnfilteredCatalog(t *testing.T) {
+	var calls atomic.Int32
+	store := fakeStore{listProducts: func(_ context.Context, prefix string) ([]database.Product, error) {
+		calls.Add(1)
+		if prefix != "" {
+			return nil, fmt.Errorf("expected an unfiltered product query, got %q", prefix)
+		}
+		return []database.Product{{ID: 1, Name: "Mechanical Keyboard"}}, nil
+	}}
+	handler := NewHandler(store)
+
+	const requestCount = 20
+	start := make(chan struct{})
+	statuses := make(chan int, requestCount)
+	var requests sync.WaitGroup
+	for range requestCount {
+		requests.Go(func() {
+			<-start
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/products", nil))
+			statuses <- recorder.Code
+		})
+	}
+	close(start)
+	requests.Wait()
+	close(statuses)
+
+	for status := range statuses {
+		if status != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, status)
+		}
+	}
+
+	if calls.Load() != 1 {
+		t.Fatalf("expected one product query, got %d", calls.Load())
+	}
+}
+
+func TestListProductsRetriesFailedCacheLoad(t *testing.T) {
+	calls := 0
+	store := fakeStore{listProducts: func(context.Context, string) ([]database.Product, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("database unavailable")
+		}
+		return []database.Product{{ID: 1, Name: "Mechanical Keyboard"}}, nil
+	}}
+	handler := NewHandler(store)
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/products", nil))
+	if first.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, first.Code)
+	}
+
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/products", nil))
+	if second.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, second.Code)
+	}
+	if calls != 2 {
+		t.Fatalf("expected the failed cache load to be retried, got %d calls", calls)
 	}
 }
 
@@ -280,15 +347,15 @@ func TestGetOrder(t *testing.T) {
 		Items:       []database.OrderItem{{ProductID: 1, ProductName: "Mechanical Keyboard", Quantity: 2}},
 	}
 	store := fakeStore{
-		getOrder: func(_ context.Context, orderNumber string) (database.Order, error) {
-			if orderNumber != want.OrderNumber {
-				t.Fatalf("expected order number %q, got %q", want.OrderNumber, orderNumber)
+		getOrder: func(_ context.Context, orderID int64) (database.Order, error) {
+			if orderID != want.ID {
+				t.Fatalf("expected order ID %d, got %d", want.ID, orderID)
 			}
 			return want, nil
 		},
 	}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/orders/ORD-123", nil)
+	request := httptest.NewRequest(http.MethodGet, "/orders/7", nil)
 
 	NewHandler(store).ServeHTTP(recorder, request)
 
@@ -306,21 +373,42 @@ func TestGetOrder(t *testing.T) {
 
 func TestGetOrderReturnsNotFound(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/orders/ORD-MISSING", nil)
+	request := httptest.NewRequest(http.MethodGet, "/orders/999", nil)
 
 	NewHandler(fakeStore{}).ServeHTTP(recorder, request)
 
 	assertErrorResponse(t, recorder, http.StatusNotFound, database.ErrOrderNotFound.Error())
 }
 
+func TestGetOrderRejectsInvalidID(t *testing.T) {
+	for _, orderID := range []string{"invalid", "0", "-1"} {
+		t.Run(orderID, func(t *testing.T) {
+			called := false
+			store := fakeStore{getOrder: func(context.Context, int64) (database.Order, error) {
+				called = true
+				return database.Order{}, nil
+			}}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/orders/"+orderID, nil)
+
+			NewHandler(store).ServeHTTP(recorder, request)
+
+			assertErrorResponse(t, recorder, http.StatusBadRequest, "order id must be a positive integer")
+			if called {
+				t.Fatal("expected invalid order ID not to reach the store")
+			}
+		})
+	}
+}
+
 func TestGetOrderHandlesStoreError(t *testing.T) {
 	store := fakeStore{
-		getOrder: func(context.Context, string) (database.Order, error) {
+		getOrder: func(context.Context, int64) (database.Order, error) {
 			return database.Order{}, errors.New("database unavailable")
 		},
 	}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/orders/ORD-123", nil)
+	request := httptest.NewRequest(http.MethodGet, "/orders/7", nil)
 
 	NewHandler(store).ServeHTTP(recorder, request)
 

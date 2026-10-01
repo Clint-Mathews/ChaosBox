@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/Clint-Mathews/chaosbox/apps/store/database"
 )
@@ -49,7 +50,13 @@ func (h handler) createOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h handler) getOrder(w http.ResponseWriter, r *http.Request) {
-	order, err := h.store.GetOrder(r.Context(), r.PathValue("order_number"))
+	orderID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || orderID <= 0 {
+		writeError(w, r, http.StatusBadRequest, "order id must be a positive integer")
+		return
+	}
+
+	order, err := h.store.GetOrder(r.Context(), orderID)
 	if err != nil {
 		if errors.Is(err, database.ErrOrderNotFound) {
 			writeError(w, r, http.StatusNotFound, database.ErrOrderNotFound.Error())

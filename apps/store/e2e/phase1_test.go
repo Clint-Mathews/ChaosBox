@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -102,13 +103,14 @@ func TestPhase1Flow(t *testing.T) {
 		t.Fatalf("unexpected created order: %+v", createdOrder)
 	}
 
-	orderBody := request(t, client, http.MethodGet, server.URL+"/orders/"+createdOrder.OrderNumber, nil, http.StatusOK)
+	orderBody := request(t, client, http.MethodGet, server.URL+"/orders/"+strconv.FormatInt(createdOrder.ID, 10), nil, http.StatusOK)
 	var order database.Order
 	decodeJSON(t, orderBody, &order)
 	if order.OrderNumber != createdOrder.OrderNumber {
 		t.Fatalf("unexpected order: %+v", order)
 	}
-	request(t, client, http.MethodGet, server.URL+"/orders/ORD-MISSING", nil, http.StatusNotFound)
+	request(t, client, http.MethodGet, server.URL+"/orders/999999", nil, http.StatusNotFound)
+	request(t, client, http.MethodGet, server.URL+"/orders/not-an-id", nil, http.StatusBadRequest)
 
 	invalidBody := []byte(`{"items":[{"product_id":999999,"quantity":1}]}`)
 	request(t, client, http.MethodPost, server.URL+"/orders", invalidBody, http.StatusBadRequest)
@@ -143,7 +145,7 @@ func TestPhase1Flow(t *testing.T) {
 	t.Cleanup(server.Close)
 	t.Cleanup(db.Close)
 
-	persistedBody := request(t, server.Client(), http.MethodGet, server.URL+"/orders/"+createdOrder.OrderNumber, nil, http.StatusOK)
+	persistedBody := request(t, server.Client(), http.MethodGet, server.URL+"/orders/"+strconv.FormatInt(createdOrder.ID, 10), nil, http.StatusOK)
 	var persistedOrder database.Order
 	decodeJSON(t, persistedBody, &persistedOrder)
 	if persistedOrder.OrderNumber != createdOrder.OrderNumber {
@@ -187,7 +189,7 @@ func TestPhase1Flow(t *testing.T) {
 		t.Fatalf("expected cascade to delete order items, got %d", itemCount)
 	}
 
-	if _, err := db.GetOrder(ctx, createdOrder.OrderNumber); !errors.Is(err, database.ErrOrderNotFound) {
+	if _, err := db.GetOrder(ctx, createdOrder.ID); !errors.Is(err, database.ErrOrderNotFound) {
 		t.Fatalf("expected deleted order not to be found, got %v", err)
 	}
 }

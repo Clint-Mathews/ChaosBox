@@ -92,7 +92,7 @@ With `make minikube-tunnel` running, use `make load-smoke` to run one journey or
 
 | Service | CPU Request | CPU Limit | Memory Request | Memory Limit | Persistent Storage |
 | --- | ---: | ---: | ---: | ---: | --- |
-| Store | `10m` | `100m` | `16Mi` | `32Mi` | None |
+| Store | `10m` | `200m` | `16Mi` | `32Mi` | None |
 | PostgreSQL | `25m` | `200m` | `64Mi` | `128Mi` | `1Gi` (`ReadWriteOnce`) |
 
 These intentionally low limits establish the first failure baseline. When load testing causes CPU throttling, OOM kills, or unacceptable latency, increase one resource at a time and compare the results.

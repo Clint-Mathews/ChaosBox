@@ -11,8 +11,12 @@ import (
 
 const requestIDHeader = "X-Request-ID"
 
-type loggerContextKey struct{}
-type requestIDContextKey struct{}
+type requestContextKey struct{}
+
+type requestContext struct {
+	logger    *slog.Logger
+	requestID string
+}
 
 type responseRecorder struct {
 	http.ResponseWriter
@@ -30,7 +34,7 @@ func (w *responseRecorder) WriteHeader(status int) {
 
 func (w *responseRecorder) Write(body []byte) (int, error) {
 	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
+		w.status = http.StatusOK
 	}
 	n, err := w.ResponseWriter.Write(body)
 	w.bytes += n
@@ -55,9 +59,10 @@ func requestLogging(logger *slog.Logger, next http.Handler, metricSets ...*httpM
 			requestID = newRequestID()
 		}
 
-		requestLogger := logger.With("request_id", requestID)
-		ctx := context.WithValue(r.Context(), requestIDContextKey{}, requestID)
-		ctx = context.WithValue(ctx, loggerContextKey{}, requestLogger)
+		ctx := context.WithValue(r.Context(), requestContextKey{}, requestContext{
+			logger:    logger,
+			requestID: requestID,
+		})
 		r = r.WithContext(ctx)
 		w.Header().Set(requestIDHeader, requestID)
 		recorder := &responseRecorder{ResponseWriter: w}
@@ -66,22 +71,44 @@ func requestLogging(logger *slog.Logger, next http.Handler, metricSets ...*httpM
 			recorder.status = http.StatusOK
 		}
 
+		duration := time.Since(started)
 		route := routePattern(r.Pattern)
-		level := slog.LevelInfo
-		if route == "/health" || route == "/metrics" {
-			level = slog.LevelDebug
-		}
 		if metrics != nil {
-			metrics.observe(r.Method, route, recorder.status, time.Since(started))
+			metrics.observe(r.Method, route, recorder.status, duration)
 		}
-		requestLogger.Log(r.Context(), level, "request completed",
-			"method", r.Method,
-			"route", route,
-			"status", recorder.status,
-			"duration_ms", float64(time.Since(started).Microseconds())/1000,
-			"response_bytes", recorder.bytes,
+		level := completionLogLevel(route, recorder.status, duration)
+		if !logger.Enabled(r.Context(), level) {
+			return
+		}
+		logger.LogAttrs(r.Context(), level, "request completed",
+			slog.String("request_id", requestID),
+			slog.String("method", r.Method),
+			slog.String("route", route),
+			slog.Int("status", recorder.status),
+			slog.Float64("duration_ms", float64(duration.Microseconds())/1000),
+			slog.Int("response_bytes", recorder.bytes),
 		)
 	})
+}
+
+func completionLogLevel(route string, status int, duration time.Duration) slog.Level {
+	switch {
+	case status >= http.StatusInternalServerError:
+		return slog.LevelError
+	case status >= http.StatusBadRequest:
+		return slog.LevelWarn
+	case duration >= slowRequestThreshold(route):
+		return slog.LevelWarn
+	default:
+		return slog.LevelDebug
+	}
+}
+
+func slowRequestThreshold(route string) time.Duration {
+	if route == "/products" {
+		return 500 * time.Millisecond
+	}
+	return time.Second
 }
 
 func routePattern(pattern string) string {
@@ -111,15 +138,16 @@ func newRequestID() string {
 	return rand.Text()
 }
 
-func loggerFromContext(ctx context.Context) *slog.Logger {
-	logger, ok := ctx.Value(loggerContextKey{}).(*slog.Logger)
+func logError(ctx context.Context, message string, args ...any) {
+	request, ok := ctx.Value(requestContextKey{}).(requestContext)
 	if !ok {
-		return slog.Default()
+		slog.Default().ErrorContext(ctx, message, args...)
+		return
 	}
-	return logger
+	request.logger.ErrorContext(ctx, message, append([]any{"request_id", request.requestID}, args...)...)
 }
 
 func RequestIDFromContext(ctx context.Context) string {
-	requestID, _ := ctx.Value(requestIDContextKey{}).(string)
-	return requestID
+	request, _ := ctx.Value(requestContextKey{}).(requestContext)
+	return request.requestID
 }

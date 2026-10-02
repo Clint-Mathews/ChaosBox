@@ -225,7 +225,7 @@ func assertPreparedSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool)
 		}
 	}
 
-	assertRowCount(t, ctx, pool, "schema_migrations", 1)
+	assertRowCount(t, ctx, pool, "schema_migrations", 2)
 	assertRowCount(t, ctx, pool, "products", 5)
 
 	var indexDefinition string
@@ -236,6 +236,16 @@ func assertPreparedSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool)
 	}
 	if !strings.Contains(indexDefinition, "text_pattern_ops") {
 		t.Fatalf("expected text_pattern_ops index, got %q", indexDefinition)
+	}
+
+	var orderItemsProductIndexExists bool
+	if err := pool.QueryRow(ctx,
+		`SELECT to_regclass('order_items_product_id_idx') IS NOT NULL`,
+	).Scan(&orderItemsProductIndexExists); err != nil {
+		t.Fatalf("check order items product index: %v", err)
+	}
+	if orderItemsProductIndexExists {
+		t.Fatal("expected unused order items product index to be removed")
 	}
 }
 

@@ -27,7 +27,7 @@ type handler struct {
 type productCache struct {
 	mu       sync.RWMutex
 	loaded   bool
-	products []database.Product
+	response []byte
 }
 
 func NewHandler(store Store, loggers ...*slog.Logger) http.Handler {

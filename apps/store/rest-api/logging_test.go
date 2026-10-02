@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Clint-Mathews/chaosbox/apps/store/database"
 )
@@ -61,7 +62,7 @@ func TestRequestID(t *testing.T) {
 
 func TestRequestCompletionLog(t *testing.T) {
 	var output bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	logger := slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("created"))
@@ -76,6 +77,7 @@ func TestRequestCompletionLog(t *testing.T) {
 
 	entry := decodeLogEntry(t, output.String())
 	assertLogValue(t, entry, "msg", "request completed")
+	assertLogValue(t, entry, "level", "DEBUG")
 	assertLogValue(t, entry, "request_id", "request-123")
 	assertLogValue(t, entry, "method", http.MethodPost)
 	assertLogValue(t, entry, "route", "/orders")
@@ -88,7 +90,7 @@ func TestRequestCompletionLog(t *testing.T) {
 
 func TestRequestCompletionLogCapturesImplicitOK(t *testing.T) {
 	var output bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	logger := slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -100,6 +102,43 @@ func TestRequestCompletionLogCapturesImplicitOK(t *testing.T) {
 	entry := decodeLogEntry(t, output.String())
 	assertLogValue(t, entry, "status", float64(http.StatusOK))
 	assertLogValue(t, entry, "response_bytes", float64(len("ok")))
+}
+
+func TestSuccessfulCompletionLogIsSuppressedAtInfo(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	request := httptest.NewRequest(http.MethodGet, "/products", nil)
+	recorder := httptest.NewRecorder()
+
+	NewHandler(fakeStore{}, logger).ServeHTTP(recorder, request)
+
+	if output.Len() != 0 {
+		t.Fatalf("expected successful completion log to be suppressed, got %q", output.String())
+	}
+}
+
+func TestCompletionLogLevel(t *testing.T) {
+	tests := []struct {
+		name     string
+		route    string
+		status   int
+		duration time.Duration
+		want     slog.Level
+	}{
+		{name: "ordinary success", route: "/orders/{id}", status: http.StatusOK, duration: 100 * time.Millisecond, want: slog.LevelDebug},
+		{name: "slow product", route: "/products", status: http.StatusOK, duration: 500 * time.Millisecond, want: slog.LevelWarn},
+		{name: "slow order", route: "/orders", status: http.StatusCreated, duration: time.Second, want: slog.LevelWarn},
+		{name: "client error", route: "/orders/{id}", status: http.StatusNotFound, want: slog.LevelWarn},
+		{name: "server error", route: "/orders", status: http.StatusInternalServerError, want: slog.LevelError},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := completionLogLevel(test.route, test.status, test.duration); got != test.want {
+				t.Fatalf("expected level %s, got %s", test.want, got)
+			}
+		})
+	}
 }
 
 func TestInternalErrorLogUsesRequestID(t *testing.T) {

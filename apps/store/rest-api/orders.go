@@ -40,7 +40,7 @@ func (h handler) createOrder(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, database.ErrDuplicateProduct):
 			writeError(w, r, http.StatusBadRequest, database.ErrDuplicateProduct.Error())
 		default:
-			loggerFromContext(r.Context()).ErrorContext(r.Context(), "create order failed", "error", err)
+			logError(r.Context(), "create order failed", "error", err)
 			writeError(w, r, http.StatusInternalServerError, "failed to create order")
 		}
 		return
@@ -62,7 +62,7 @@ func (h handler) getOrder(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusNotFound, database.ErrOrderNotFound.Error())
 			return
 		}
-		loggerFromContext(r.Context()).ErrorContext(r.Context(), "get order failed", "error", err)
+		logError(r.Context(), "get order failed", "error", err)
 		writeError(w, r, http.StatusInternalServerError, "failed to fetch order")
 		return
 	}

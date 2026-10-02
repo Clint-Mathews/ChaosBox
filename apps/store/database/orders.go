@@ -37,15 +37,15 @@ func (db *DB) CreateOrder(ctx context.Context, items []NewOrderItem) (Order, err
 	}
 	defer rows.Close()
 
-	orders, err := scanOrders(rows)
+	order, found, err := scanOrder(rows)
 	if err != nil {
 		return Order{}, mapCreateOrderError(err)
 	}
-	if len(orders) != 1 {
-		return Order{}, fmt.Errorf("create order: expected one order, got %d", len(orders))
+	if !found {
+		return Order{}, fmt.Errorf("create order: expected one order, got 0")
 	}
 
-	return orders[0], nil
+	return order, nil
 }
 
 func (db *DB) GetOrder(ctx context.Context, orderID int64) (Order, error) {
@@ -55,18 +55,14 @@ func (db *DB) GetOrder(ctx context.Context, orderID int64) (Order, error) {
 	}
 	defer rows.Close()
 
-	orders, err := scanOrders(rows)
+	order, found, err := scanOrder(rows)
 	if err != nil {
 		return Order{}, err
 	}
-	if len(orders) == 0 {
+	if !found {
 		return Order{}, ErrOrderNotFound
 	}
-	if len(orders) != 1 {
-		return Order{}, fmt.Errorf("query order: expected one order, got %d", len(orders))
-	}
-
-	return orders[0], nil
+	return order, nil
 }
 
 const orderQuery = `
@@ -109,38 +105,37 @@ func mapCreateOrderError(err error) error {
 	return fmt.Errorf("create order: %w", err)
 }
 
-func scanOrders(rows pgx.Rows) ([]Order, error) {
-	orders := make([]Order, 0)
-	orderIndexes := make(map[int64]int)
-
+func scanOrder(rows pgx.Rows) (Order, bool, error) {
+	var order Order
+	found := false
 	for rows.Next() {
-		var order Order
+		var rowOrder Order
 		var item OrderItem
 		if err := rows.Scan(
-			&order.ID,
-			&order.OrderNumber,
-			&order.CreatedAt,
+			&rowOrder.ID,
+			&rowOrder.OrderNumber,
+			&rowOrder.CreatedAt,
 			&item.ProductID,
 			&item.ProductName,
 			&item.Quantity,
 		); err != nil {
-			return nil, fmt.Errorf("scan order: %w", err)
+			return Order{}, false, fmt.Errorf("scan order: %w", err)
 		}
 
-		index, exists := orderIndexes[order.ID]
-		if !exists {
+		if !found {
+			order = rowOrder
 			order.Items = make([]OrderItem, 0, 1)
-			orders = append(orders, order)
-			index = len(orders) - 1
-			orderIndexes[order.ID] = index
+			found = true
+		} else if rowOrder.ID != order.ID {
+			return Order{}, false, fmt.Errorf("scan order: query returned multiple orders")
 		}
-		orders[index].Items = append(orders[index].Items, item)
+		order.Items = append(order.Items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate orders: %w", err)
+		return Order{}, false, fmt.Errorf("iterate order: %w", err)
 	}
 
-	return orders, nil
+	return order, found, nil
 }
 
 func newOrderNumber() (string, error) {

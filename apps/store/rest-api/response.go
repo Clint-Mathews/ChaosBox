@@ -7,9 +7,18 @@ import (
 
 func writeJSON(w http.ResponseWriter, r *http.Request, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+	}
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		loggerFromContext(r.Context()).ErrorContext(r.Context(), "encode response failed", "error", err)
+		logError(r.Context(), "encode response failed", "error", err)
+	}
+}
+
+func writeJSONBytes(w http.ResponseWriter, r *http.Request, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(body); err != nil {
+		logError(r.Context(), "write response failed", "error", err)
 	}
 }
 

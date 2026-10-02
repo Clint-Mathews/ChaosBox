@@ -2,48 +2,56 @@ package restapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
-
-	"github.com/Clint-Mathews/chaosbox/apps/store/database"
 )
 
 func (h handler) listProducts(w http.ResponseWriter, r *http.Request) {
 	namePrefix := r.URL.Query().Get("name_prefix")
-	products, err := h.listProductsCached(r.Context(), namePrefix)
-	if err != nil {
-		loggerFromContext(r.Context()).ErrorContext(r.Context(), "list products failed", "error", err)
-		writeError(w, r, http.StatusInternalServerError, "failed to fetch products")
+	if namePrefix != "" {
+		products, err := h.store.ListProducts(r.Context(), namePrefix)
+		if err != nil {
+			logError(r.Context(), "list products failed", "error", err)
+			writeError(w, r, http.StatusInternalServerError, "failed to fetch products")
+			return
+		}
+		writeJSON(w, r, http.StatusOK, products)
 		return
 	}
 
-	writeJSON(w, r, http.StatusOK, products)
+	response, err := h.productResponseCached(r.Context())
+	if err != nil {
+		logError(r.Context(), "list products failed", "error", err)
+		writeError(w, r, http.StatusInternalServerError, "failed to fetch products")
+		return
+	}
+	writeJSONBytes(w, r, response)
 }
 
-func (h handler) listProductsCached(ctx context.Context, namePrefix string) ([]database.Product, error) {
-	if namePrefix != "" {
-		return h.store.ListProducts(ctx, namePrefix)
-	}
-
+func (h handler) productResponseCached(ctx context.Context) ([]byte, error) {
 	h.productCache.mu.RLock()
 	if h.productCache.loaded {
-		products := h.productCache.products
+		response := h.productCache.response
 		h.productCache.mu.RUnlock()
-		return products, nil
+		return response, nil
 	}
 	h.productCache.mu.RUnlock()
 
 	h.productCache.mu.Lock()
 	defer h.productCache.mu.Unlock()
 	if h.productCache.loaded {
-		return h.productCache.products, nil
+		return h.productCache.response, nil
 	}
 
 	products, err := h.store.ListProducts(ctx, "")
 	if err != nil {
 		return nil, err
 	}
-	h.productCache.products = make([]database.Product, len(products))
-	copy(h.productCache.products, products)
+	response, err := json.Marshal(products)
+	if err != nil {
+		return nil, err
+	}
+	h.productCache.response = append(response, '\n')
 	h.productCache.loaded = true
-	return h.productCache.products, nil
+	return h.productCache.response, nil
 }

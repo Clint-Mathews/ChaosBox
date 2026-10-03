@@ -33,7 +33,7 @@ Fetching all orders would return a growing response as new orders are created, s
 - Docker
 - Seed scripts
 
-### Status: Testing In Progress
+### Status: Complete
 
 - The Go REST API implements health, product listing, order creation, and single-order lookup.
 - PostgreSQL migrations create products, orders, and order items with constraints and indexes.
@@ -48,6 +48,9 @@ Fetching all orders would return a growing response as new orders are created, s
 - Unit, race, and Testcontainers end-to-end tests are available through the root Makefile.
 - Bruno contains the complete local Phase 1 API flow.
 - GitHub Actions runs formatting, tests, vetting, PostgreSQL end-to-end checks, and a container build.
+- Product responses are cached in-process because the seeded catalog is immutable during the Phase 1 experiment.
+- Order creation uses one writable CTE statement, and order retrieval uses the order primary key.
+- Repeated comparison runs selected a 12-connection database pool and a `200m` store CPU limit.
 
 ### Architecture
 
@@ -73,10 +76,10 @@ Grafana Alloy collects Kubernetes pod logs and sends them to Loki with 24-hour r
 
 ### Testing
 
-Testing has two layers:
+Testing used two layers:
 
 - Correctness testing through Go unit tests, race detection, Testcontainers end-to-end tests, Bruno, and GitHub Actions.
-- Load testing in Minikube with CPU and memory limits while traffic ramps from 0 to 100 concurrent users at one new user per second.
+- Load testing in Minikube with CPU and memory limits while traffic ramps from 0 to 100 concurrent users over 60 seconds.
 
 The load script in `tests/load/phase1.py` has each virtual user repeatedly perform this flow:
 
@@ -84,7 +87,7 @@ The load script in `tests/load/phase1.py` has each virtual user repeatedly perfo
 GET /products -> wait 200 ms -> POST /orders -> wait 200 ms -> GET /orders/{id}
 ```
 
-The load test must fetch each created order by `id` and verify that the returned `order_number` matches it, at least 99% of checks pass, the HTTP failure rate remains below 1%, and the store pod has no unexpected restarts or OOM kills.
+The load test fetches each created order by `id` and verifies that the returned `order_number` matches it. A passing run requires at least 99% of checks to pass, an HTTP failure rate below 1%, and no unexpected store restarts or OOM kills.
 
 With `make minikube-tunnel` running, use `make load-smoke` to run one journey or `make load-test` to ramp up virtual users. `make smoke` checks only health and products on a local server.
 
@@ -93,6 +96,44 @@ With `make minikube-tunnel` running, use `make load-smoke` to run one journey or
 | Service | CPU Request | CPU Limit | Memory Request | Memory Limit | Persistent Storage |
 | --- | ---: | ---: | ---: | ---: | --- |
 | Store | `10m` | `200m` | `16Mi` | `32Mi` | None |
-| PostgreSQL | `25m` | `200m` | `64Mi` | `128Mi` | `1Gi` (`ReadWriteOnce`) |
+| PostgreSQL | `25m` | `500m` | `64Mi` | `256Mi` | `1Gi` (`ReadWriteOnce`) |
 
-These intentionally low limits establish the first failure baseline. When load testing causes CPU throttling, OOM kills, or unacceptable latency, increase one resource at a time and compare the results.
+These limits are the final Phase 1 comparison configuration. Resource experiments changed one constrained variable at a time rather than increasing the entire stack together.
+
+### Measured Result
+
+The final repeated configuration used one store replica, a 12-connection pool, a 60-second ramp to 100 users, and a 300-second hold. The latest passing result completed 155,532 requests with zero failures:
+
+- 431.51 HTTP requests per second.
+- 143.84 complete journeys per second.
+- Product p95: 188.56 ms.
+- Create-order p95: 386.26 ms.
+- Get-order p95: 345.30 ms.
+
+This is a local closed-model benchmark, not a production capacity rating. One hundred users with 400 ms total think time also impose a theoretical ceiling of 750 RPS. Phase 2 therefore changes both the deployment environment and the capacity-test model.
+
+### Key Insights
+
+- Correct request arithmetic is part of benchmark validation: each successful journey must produce exactly three requests and six checks.
+- A growing collection response made the original workload progressively more expensive, so the user flow was changed to fetch only the order just created.
+- Caching the immutable product catalog, using the order primary key, and reducing order creation to one SQL round trip removed repeated work before adding resources.
+- Database CPU, application CPU, and pool size are separate variables. The 12-connection pool was retained only after a repeated run separated its effect from host disk contention.
+- Memory was not the constraint; the store remained at `32Mi` rather than increasing memory without evidence.
+- Complete journeys, route latency, failures, resource saturation, profiles, and environmental noise all matter more than an isolated peak-RPS number.
+
+## Phase 2
+
+### Status: Planned
+
+### Goal
+
+Reproduce the trusted baseline in one GCP region, make application replication operationally safe, and measure horizontal scaling from one to multiple store replicas.
+
+### Scope
+
+- Move schema migrations and product seeding out of every application startup into an explicit deployment job.
+- Add idempotency for order creation, graceful shutdown, hardened readiness and liveness probes, disruption controls, and topology-aware scheduling.
+- Deploy the store to a regional GKE cluster and PostgreSQL to Cloud SQL over private networking.
+- Run an open arrival-rate load generator outside the application cluster.
+- Compare fixed replica counts with a fixed aggregate database-connection budget before enabling HPA.
+- Retain correctness, latency, saturation, resilience, and cost evidence for every promoted result.

@@ -4,7 +4,7 @@ A local Kubernetes playground for simulating production conditions such as resou
 
 ChaosBox explores how a deliberately simple system can evolve toward large workloads. Rather than simulating a billion concurrent users locally, each phase introduces production-shaped traffic and failures, identifies the next measurable constraint, and tests a targeted improvement.
 
-See [Project Phases](PHASES.md) for the goals, API behavior, test criteria, and resource limits of each phase.
+See [Project Phases](PHASES.md) for completed and current goals, API behavior, test criteria, and resource limits.
 
 ## Getting Started
 
@@ -39,6 +39,29 @@ The Phase 1 system uses one Nginx Ingress endpoint for the store and observabili
 
 ## Current Status
 
-Phase 1 testing is in progress. The Go API, PostgreSQL migrations and seed data, structured request logging, Prometheus instrumentation, Grafana dashboards, Loki log collection, container images, Minikube manifests, automated tests, load generator, Bruno flow, and CI pipeline are implemented.
+### Phase 1: Complete
 
-See [Phase 1 details](PHASES.md#phase-1) for the full status and testing requirements.
+Phase 1 established a trusted local, single-replica baseline. The final repeated configuration used one Go store replica limited to `200m` CPU and `32Mi` memory, PostgreSQL limited to `500m` CPU and `256Mi` memory, and a 12-connection database pool.
+
+The latest passing run completed 155,532 requests with zero failures:
+
+- 431.51 HTTP requests per second.
+- 143.84 complete three-request journeys per second.
+- 188.56 ms product p95, 386.26 ms create-order p95, and 345.30 ms get-order p95.
+
+The important result is not the largest number. Phase 1 produced a repeatable method and several concrete lessons:
+
+- Validate complete business journeys and reconcile request counts before trusting RPS.
+- Keep the workload bounded; replacing a growing all-orders read with a primary-key lookup made runs comparable.
+- Remove repeated work before adding capacity; the product catalog cache and one-statement order write reduced application and database work.
+- Tune resources and the connection pool independently; more connections did not compensate for constrained PostgreSQL or store CPU.
+- Repeat outliers before accepting or rejecting a configuration; host disk contention distorted one pool-size comparison.
+- Preserve synchronized load-test, metrics, logs, and profile windows so every conclusion has supporting evidence.
+
+See [Phase 1 details](PHASES.md#phase-1) for the implementation, test method, and measured result.
+
+### Phase 2: Scale Through GCP
+
+Phase 2 moves the same service into one GCP region and tests horizontal scaling safely. Before replicas increase, migrations and seed work move out of application startup, order creation gains idempotency, shutdown becomes graceful, probes are hardened, and one aggregate database-connection budget is defined.
+
+The test sequence first reproduces the single-replica baseline in GCP, then compares fixed replica counts before enabling autoscaling. Load generation runs outside the application cluster and uses an open arrival-rate model for capacity testing.
